@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs><radialGradient id="ice" cx="50%" cy="30%" r="75%"><stop offset="0" stop-color="#1d3a55"/><stop offset="1" stop-color="#0b131a"/></radialGradient></defs><rect width="512" height="512" rx="112" fill="url(#ice)"/><g transform="translate(0 -14)">
+  <g stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- stick A: top-left to bottom-right, blade points right -->
+    <path d="M118 78 L338 352 Q356 378 386 380 L438 380" stroke="#e8eef3" stroke-width="34"/>
+    <path d="M118 78 L150 118" stroke="#e53a2f" stroke-width="34"/>
+    <path d="M384 380 L438 380" stroke="#e53a2f" stroke-width="34"/>
+    <!-- gap so stick B reads as on top -->
+    <path d="M394 78 L174 352 Q156 378 126 380 L74 380" stroke="#0e1a26" stroke-width="54"/>
+    <!-- stick B: top-right to bottom-left, blade points left -->
+    <path d="M394 78 L174 352 Q156 378 126 380 L74 380" stroke="#e8eef3" stroke-width="34"/>
+    <path d="M394 78 L362 118" stroke="#e53a2f" stroke-width="34"/>
+    <path d="M128 380 L74 380" stroke="#e53a2f" stroke-width="34"/>
+  </g>
+  <!-- puck -->
+  <ellipse cx="256" cy="436" rx="74" ry="20" fill="#05080b"/>
+  <rect x="182" y="412" width="148" height="24" fill="#05080b"/>
+  <ellipse cx="256" cy="412" rx="74" ry="20" fill="#232c35"/>
+  <ellipse cx="256" cy="410" rx="54" ry="12" fill="none" stroke="#3a4652" stroke-width="3"/>
+</g></svg>
