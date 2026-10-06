@@ -1462,26 +1462,35 @@ const Share = {
   },
 
   async read(file) {
+    const gb = n => (n / 1e9).toFixed(2) + ' GB';
     const magic = await file.slice(0, 10).text();
     if (magic === 'RINKPACK1\n') {
       const len = parseInt(await file.slice(10, 22).text(), 10);
+      if (!(len > 0) || 22 + len > file.size) throw new Error('incomplete:' + file.size + ':' + (22 + len));
       const header = JSON.parse(await file.slice(22, 22 + len).text());
       let off = 22 + len;
+      const expected = off + header.files.reduce((n, f) => n + f.size, 0);
+      // a download that stopped early leaves a short file: catch it here rather than half-loading
+      if (file.size < expected) throw new Error('incomplete:' + file.size + ':' + expected);
       const files = header.files.map(f => { const blob = file.slice(off, off + f.size, f.type); off += f.size; return { key: f.key, blob }; });
-      return { kind: 'pack', show: Show.normalise(header.show), files };
+      return { kind: 'pack', show: Show.normalise(header.show), files, size: file.size };
     }
-    const json = JSON.parse((await file.text()).replace(/^﻿/, ''));
-    return { kind: 'layout', show: Show.normalise(json), files: [] };
+    // never read a big non-pack file as text: it can freeze a phone
+    if (file.size > 20e6) throw new Error('notpack');
+    const json = JSON.parse((await file.text()).replace(/^\uFEFF/, ''));
+    return { kind: 'layout', show: Show.normalise(json), files: [], size: file.size };
   },
 
   async apply(parsed, say) {
-    let n = 0;
+    try { await navigator.storage?.persist?.(); } catch (e) {}
+    let n = 0, failed = 0;
     for (const f of parsed.files) {
-      await Library.putBlob(f.key, f.blob);
+      if (!(await Library.putBlob(f.key, f.blob))) failed++;
       if (++n % 10 === 0 || n === parsed.files.length) say(`Copying songs ${n} of ${parsed.files.length}…`);
     }
     setShow(parsed.show);
     await Store.put('kv', 'show', show).catch(() => {});
+    return { failed };
   },
 };
 
@@ -1520,27 +1529,62 @@ const Settings = {
       const f = e.target.files[0];
       e.target.value = '';
       if (!f) return;
+      const prog = $('#shareProgress');
+      const gb = n => n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB';
+      $('#confirmOpen').hidden = true;
+      say(`Reading “${f.name}” (${gb(f.size)})…`);
+      prog.scrollIntoView({ block: 'center' });
+      const slow = setTimeout(() => say(`Still reading “${f.name}”… If you picked it from Google Drive inside the file picker, download it to this device first, then pick it from Downloads.`), 15000);
       try {
         this.pending = await Share.read(f);
+        clearTimeout(slow);
         const p = this.pending;
         const buttons = p.show.tabs.reduce((n, t) => n + t.items.length, 0);
+        let room = '';
+        try {
+          const est = await navigator.storage?.estimate?.();
+          if (est && p.kind === 'pack' && est.quota - est.usage < p.size * 1.05) {
+            room = ` Warning: this device may not have room for it (needs ${gb(p.size)}, about ${gb(Math.max(0, est.quota - est.usage))} free for the app). Free up space first.`;
+          }
+        } catch (err) {}
         $('#confirmText').textContent = `Open “${p.show.name}”? It has ${p.show.tabs.length} tabs and ${buttons} buttons` +
-          (p.kind === 'pack' ? `, plus ${p.files.length} song files.` : '. Songs come from the music already on this device.') +
-          ' It replaces the show on this device. Your music stays.';
+          (p.kind === 'pack' ? `, plus ${p.files.length} song files (${gb(p.size)}).` : '. Songs come from the music already on this device.') +
+          ' It replaces the show on this device. Your music stays.' + room;
         $('#confirmOpen').hidden = false;
         say('');
+        $('#confirmOpen').scrollIntoView({ block: 'center' });
       } catch (err) {
+        clearTimeout(slow);
         console.error(err);
-        say('That file isn\'t a Rinkside layout (.rinkside.json) or show pack (.rinkpack).');
+        const m = String(err && err.message || '');
+        if (m.startsWith('incomplete:')) {
+          const [, have, need] = m.split(':').map(Number);
+          say(`This show pack is incomplete (${gb(have)} of ${gb(need)}). The download probably didn't finish. Delete it, download it again, and wait until it's done.`);
+        } else if (m === 'notpack') {
+          say(`“${f.name}” isn't a Rinkside show pack. Pick the file that ends in .rinkpack.`);
+        } else if (err && (err.name === 'NotReadableError' || err.name === 'NotFoundError' || err.name === 'SecurityError')) {
+          say(`The phone wouldn't let the app read “${f.name}”. Download it to this device first (Part 2 of the guide), then pick it from Downloads.`);
+        } else {
+          say(`“${f.name}” isn't a Rinkside layout (.rinkside.json) or show pack (.rinkpack), or it's damaged. Try downloading it again.`);
+        }
+        prog.scrollIntoView({ block: 'center' });
       }
     });
     $('#confirmYes').addEventListener('click', async () => {
       const p = this.pending;
       if (!p) return;
       $('#confirmOpen').hidden = true;
-      await Share.apply(p, say);
+      say('Copying songs…');
+      try {
+        const { failed } = await Share.apply(p, say);
+        say(failed
+          ? `Opened “${show.name}”, but ${failed} of ${p.files.length} songs couldn't be saved on this device (it may be out of space). They'll work until the app is closed. Free up space and open the pack again.`
+          : `Opened “${show.name}”.`);
+      } catch (err) {
+        console.error(err);
+        say('Something went wrong while copying the songs. Make sure the device has enough free space and try again.');
+      }
       this.pending = null;
-      say(`Opened “${show.name}”.`);
       this.render();
     });
     $('#confirmNo').addEventListener('click', () => { this.pending = null; $('#confirmOpen').hidden = true; });
