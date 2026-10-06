@@ -1434,9 +1434,57 @@ const Share = {
   },
   base() { return (show.name || 'show').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'show'; },
 
-  saveLayout() {
-    this.download(new Blob([JSON.stringify(show)], { type: 'application/json' }), `${this.base()}.rinkside.json`);
-    return `Saved ${this.base()}.rinkside.json to Downloads.`;
+  /* Saving: on computers (Chrome or Edge on Windows, Mac, ChromeOS) a "Save as"
+     window lets you pick the folder and file name. Phones, tablets and Safari
+     don't allow that, so the file goes to Downloads like any other download. */
+  canPickFolder() {
+    if (typeof window.showSaveFilePicker !== 'function') return false;
+    try { return window.self === window.top; } catch (e) { return false; } // not inside a preview frame
+  },
+  // must be called straight from the button tap, before any waiting
+  async pickTarget(name, kind) {
+    if (!this.canPickFolder()) return null;
+    const types = kind === 'pack'
+      ? [{ description: 'Rinkside show pack', accept: { 'application/octet-stream': ['.rinkpack'] } }]
+      : [{ description: 'Rinkside layout', accept: { 'application/json': ['.json'] } }];
+    try {
+      return await window.showSaveFilePicker({ suggestedName: name, types, id: 'rinkside-' + kind, startIn: 'downloads' });
+    } catch (e) {
+      if (e && e.name === 'AbortError') return 'cancelled';
+      console.warn('Save picker unavailable, using a normal download', e);
+      return null;
+    }
+  },
+  async writeTo(handle, parts, say) {
+    const w = await handle.createWritable();
+    let done = 0;
+    const total = parts.reduce((n, p) => n + (p.size ?? p.byteLength ?? p.length), 0);
+    try {
+      for (const p of parts) {
+        await w.write(p);
+        done += p.size ?? p.byteLength ?? p.length;
+        if (total > 50e6) say?.(`Saving… ${Math.round(done / total * 100)}%`);
+      }
+      await w.close();
+    } catch (e) {
+      try { await w.abort(); } catch (err) {}
+      throw e;
+    }
+  },
+  downloadHint() {
+    return /Android|iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      ? ' Phones and tablets always save to the Downloads folder.'
+      : ' To choose the folder every time, turn on your browser\'s “Ask where to save each file” setting (Chrome: Settings › Downloads).';
+  },
+
+  async saveLayout(say) {
+    const name = `${this.base()}.rinkside.json`;
+    const target = await this.pickTarget(name, 'layout');
+    if (target === 'cancelled') return 'Save cancelled.';
+    const blob = new Blob([JSON.stringify(show)], { type: 'application/json' });
+    if (target) { await this.writeTo(target, [blob], say); return `Saved ${target.name}.`; }
+    this.download(blob, name);
+    return `Saved ${name} to Downloads.` + this.downloadHint();
   },
 
   /* A show pack is: "RINKPACK1\n", a 12-digit header length, a JSON header
@@ -1453,12 +1501,18 @@ const Share = {
       if (i % 20 === 0) say?.(`Gathering songs ${i + 1} of ${keys.length}…`);
     }
     const header = new TextEncoder().encode(JSON.stringify({ format: 'rinkside-pack', version: 1, show, files }));
-    return { blob: new Blob(['RINKPACK1\n', String(header.length).padStart(12, '0'), header, ...blobs], { type: 'application/octet-stream' }), count: files.length };
+    const parts = [new Blob(['RINKPACK1\n', String(header.length).padStart(12, '0'), header]), ...blobs];
+    return { parts, blob: new Blob(parts, { type: 'application/octet-stream' }), count: files.length };
   },
   async savePack(say) {
-    const { blob, count } = await this.buildPack(say);
-    this.download(blob, `${this.base()}.rinkpack`);
-    return `Saved ${this.base()}.rinkpack (${(blob.size / 1e9).toFixed(2)} GB, ${count} songs) to Downloads.`;
+    const name = `${this.base()}.rinkpack`;
+    const target = await this.pickTarget(name, 'pack'); // ask first, while the tap still counts
+    if (target === 'cancelled') return 'Save cancelled.';
+    const { parts, blob, count } = await this.buildPack(say);
+    const size = `${(blob.size / 1e9).toFixed(2)} GB, ${count} songs`;
+    if (target) { await this.writeTo(target, parts, say); return `Saved ${target.name} (${size}).`; }
+    this.download(blob, name);
+    return `Saved ${name} (${size}) to Downloads.` + this.downloadHint();
   },
 
   async read(file) {
@@ -1521,7 +1575,9 @@ const Settings = {
     });
     $('#showName').addEventListener('input', e => { show.name = e.target.value; Show.save(); });
     const say = m => { $('#shareProgress').textContent = m; };
-    $('#saveLayout').addEventListener('click', () => say(Share.saveLayout()));
+    $('#saveLayout').addEventListener('click', async () => {
+      try { say(await Share.saveLayout(say)); } catch (err) { console.error(err); say('The layout file couldn\'t be saved. Try again, or pick a different folder.'); }
+    });
     $('#savePack').addEventListener('click', async () => {
       try { say(await Share.savePack(say)); } catch (err) { console.error(err); say('The show pack couldn\'t be made. Try saving the layout file instead.'); }
     });

@@ -121,6 +121,10 @@ Songs are matched to buttons by folder and file name (for example
 `In Game Action/Sound of da Police - KRS-One.mp3`), then by file name alone.
 Keep file names the same when you copy music between devices.
 
+On a computer (Chrome or Edge on Windows, Mac or ChromeOS), saving opens a
+"Save as" window so you can pick the folder and file name. Phones, tablets and
+Safari always save to the Downloads folder.
+
 Save a layout file after big changes. It is also your backup.
 
 Before you share a show pack outside your own teams, remember the music in it
