@@ -1676,7 +1676,7 @@ async function boot() {
   setShow(s);
   setInterval(tick, 200);
 
-  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('sw.js').catch(() => { /* not available here (e.g. preview) */ });
   }
 }
