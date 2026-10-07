@@ -39,6 +39,52 @@ icon (no Chrome badge, no address bar) and updates itself when you publish chang
 
 ---
 
+## Updating from Google Drive (v2.0)
+
+The music and layout live in the team's Google Drive folder, shared only with
+the people who run the soundboard. Drive decides who can download; the app
+never signs in to Google.
+
+```
+Hockey Music App (shared folder)
+├── Hockey-Game-Day.rinkside.json   the layout (the newest one at the top wins)
+└── Hockey Songs/
+    ├── In Game Action/…mp3
+    ├── Rock/…mp3
+    └── …                           one folder per category, like the buttons expect
+```
+
+**To load or update a device:**
+1. Download the Hockey Songs folder and the layout file from the team's Google Drive folder (computer: right-click >
+   Download; tablet/phone: use the browser's desktop site, because the Drive app
+   can't download folders). Hockey Songs arrives as one or more zip files.
+2. In the app: Settings > **Open Drive download**, pick all the zip files.
+3. Check the summary and tap **Add to this device**. Only new or changed songs
+   are copied. Delete the zip files afterwards.
+
+A layout file or loose MP3s can be opened the same way, so for small updates
+you can download just those.
+
+**To publish an update:** put new MP3s in the right category folder, give them
+buttons in the app (Edit > Add songs, picking the same file), then Settings >
+Save layout file and put it in the Drive folder in place of the old one. Keep
+show packs and other big files out of the Rinkside folder so downloads stay small.
+
+**Optional: checking online with no download.** `Drive.check` can read a folder
+shared as "Anyone with the link" using a Google API key (Drive API v3). It stays
+hidden until `DRIVE.key` at the top of `app.js` is filled in.
+
+---
+
+## Versions
+
+The version shows at the bottom of Settings and Help, with the layout's date.
+v1.0 (before Drive sync) is kept on the `v1.0-stable` branch on GitHub, and as
+`dist/Rinkside-Soundboard-v1-stable.html`. To go back: on GitHub, Settings >
+Pages > set the branch to `v1.0-stable`.
+
+---
+
 ## Running a game
 
 - **Pick the team** at the top left. The big GOAL! button, Pregame and Game music follow the team.
@@ -142,6 +188,7 @@ is licensed to you, not to them.
 | `app.css` | All the styling. |
 | `body.html` | The page layout, including the Help text. |
 | `show.json` | The built-in show (tabs, buttons, teams, logos). |
+| `dist/Rinkside-Soundboard-v1-stable.html` | v1.0, the last version before Drive sync, kept as a fallback. |
 | `build.py` | Rebuilds `index.html` and the single file after you change the files above. |
 | `sw.js`, `manifest.webmanifest`, `icon.svg`, `icon-*.png`, `apple-touch-icon.png` | Let the hosted version install and run offline. |
 | `logos/` | Original logo images (the show file has its own copies). |
@@ -176,6 +223,11 @@ Plain HTML, CSS and JavaScript. No build tools or libraries beyond Python for `b
   `playlist` (`name`, `songs`: list of sound ids) or `next`.
 - **Show pack**: the text `RINKPACK1\n`, a 12-digit header length, a JSON header
   `{ show, files: [{ key, size, type }] }`, then the song files back to back.
-- **Storage on the device**: IndexedDB `rinkside` (store `kv` holds the show,
-  store `audio` holds song files by path), and localStorage for small settings.
+- **Storage on the device**: IndexedDB `rinkside` (store `kv` holds the show and
+  `driveManifest`, the Drive id/md5/size of each downloaded song; store `audio`
+  holds song files by path), and localStorage for small settings.
+- **Drive imports** (`Zip` and `Drive` in app.js): reads Drive's zip downloads
+  in place (stored or deflate via DecompressionStream, zip64, UTF-8 names), picks
+  the top-most newest `.rinkside.json`, and compares songs by folder/file name and
+  size. The optional online check uses Drive API v3 with an API key and md5.
 - **Defaults** (fade lengths and so on) are at the top of `app.js`.

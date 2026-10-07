@@ -11,6 +11,8 @@
    from your Sound Show project read best on a dark surface.
    --team is set from the selected team (logo colour or Settings). */
 
+[hidden] { display: none !important; }
+
 :root {
   color-scheme: dark;
   --bg: #0a1117;          /* booth dark, blue-biased */
@@ -539,3 +541,15 @@ dialog.help { width: min(720px, calc(100% - 32px)); }
   .pad.hit::after, .hero-pad.hit::after { animation: none; }
   body.has-audio .live-dot { animation: none; }
 }
+
+/* Google Drive sync */
+.meter { height: 10px; border-radius: 99px; background: var(--raised); overflow: hidden; margin: 10px 0 4px; }
+.meter i { display: block; height: 100%; width: 0; background: var(--live); transition: width .3s ease; }
+.confirm .setting { margin: 8px 0; }
+#driveConn { margin-top: 6px; }
+#driveConn summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 6px 0; }
+.about { margin-top: 18px; text-align: center; opacity: .8; }
+.file-btn.disabled { opacity: .5; pointer-events: none; }
+.howto { margin: 6px 0 4px; }
+.howto .steps { margin: 6px 0; padding-left: 20px; }
+.howto .steps li { margin: 6px 0; font-size: 14px; }

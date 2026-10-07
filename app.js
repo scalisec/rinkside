@@ -34,6 +34,23 @@ const DEFAULTS = {
   skipPlayed: true,        // playlists and random buttons prefer songs not played yet this game
   team: null,              // selected team id
   locked: false,           // volunteer lock hides settings and editing
+  driveFolder: '',         // Settings › Drive connection: overrides DRIVE.folder on this device
+  driveKey: '',            // ...and DRIVE.key
+  driveApi: '',            // testing only: a stand-in for Google's server
+  driveLayout: null,       // { id, name, modifiedTime } of the last layout loaded from Drive
+};
+
+const APP_VERSION = '2.0';
+
+/* Google Drive sync (Settings › Update from Google Drive).
+   folder: the shared folder holding the layout file (.rinkside.json) and the music folders.
+           It must be shared as "Anyone with the link – Viewer".
+   key:    a Google Cloud API key restricted to the Google Drive API. It can only read files
+           that are already shared with anyone who has the link. */
+const DRIVE = {
+  folder: '1Yme-C_z7clr8pQZ7nYsY5grGmgk_SL_v',
+  key: '',
+  api: 'https://www.googleapis.com/drive/v3/',
 };
 
 const DEFAULT_SHOW_URL = 'show.json'; // built-in show for the hosted version
@@ -198,10 +215,24 @@ const Library = {
   async load() { (await Store.keys('audio')).forEach(k => this.add(k)); },
   async blobByKey(key) { return this.mem.get(key) || await Store.get('audio', key) || null; },
   async blob(sound) { const k = this.resolve(sound); return k ? this.blobByKey(k) : null; },
-  async putBlob(key, blob) {
-    this.mem.set(key, blob);
-    this.add(key);
-    try { await Store.put('audio', key, blob); return !!Store.db; } catch (e) { return false; }
+  // keep: also hold it for this session (picked files are cheap to hold; downloaded ones are not)
+  async putBlob(key, blob, keep = true) {
+    if (keep) this.mem.set(key, blob);
+    let ok = false;
+    this.lastError = null;
+    try { await Store.put('audio', key, blob); ok = !!Store.db; } catch (e) { this.lastError = e; }
+    if (ok || keep) this.add(key);
+    return ok;
+  },
+  async remove(keys) {
+    for (const k of keys) {
+      await Store.del('audio', k);
+      this.mem.delete(k);
+      if (urlCache.has(k)) { URL.revokeObjectURL(urlCache.get(k)); urlCache.delete(k); }
+    }
+    this.byTail.clear(); this.byBase.clear();
+    const all = new Set([...(await Store.keys('audio')), ...this.mem.keys()]);
+    all.forEach(k => this.add(k));
   },
   async importFiles(fileList, onProgress) {
     const files = [...fileList].filter(f => AUDIO_EXT.test(f.name));
@@ -744,7 +775,7 @@ const UI = {
       if (act === 'close') { activePL?.track?.fadeOut(); activePL = null; this.renderDock(); this.refreshPads(); }
     });
     $('#settingsBtn').addEventListener('click', () => Settings.open());
-    $('#helpBtn').addEventListener('click', () => $('#help').showModal());
+    $('#helpBtn').addEventListener('click', () => { renderAbout(); $('#help').showModal(); });
     $('#editBtn').addEventListener('click', () => Edit.toggle());
     // Full screen hides Chrome's address bar. Not needed (or offered) when installed as an app.
     const fb = $('#fullBtn');
@@ -765,12 +796,13 @@ const UI = {
 
   uiAction(act, el) {
     if (act === 'settings') Settings.open();
+    if (act === 'drive') { Settings.open(); setTimeout(() => { $('#driveSection').scrollIntoView({ block: 'start' }); if (Drive.ready()) $('#driveCheck').click(); }, 50); }
     if (act === 'tab-settings') Edit.tab(Show.tab(el.dataset.tabId));
     if (act === 'groups') Edit.groups(el.dataset.section);
     if (act === 'add-playlist') Edit.addPlaylist(Show.tab(el.dataset.tabId));
     if (act === 'add-next') Edit.addNext(Show.tab(el.dataset.tabId));
     if (act === 'team') { if (Edit.on || !settings.locked) Edit.team(Teams.current); }
-    if (act === 'help') $('#help').showModal();
+    if (act === 'help') { renderAbout(); $('#help').showModal(); }
   },
 
   setLocked(on, quiet = false) {
@@ -882,8 +914,8 @@ const UI = {
     const any = Show.uniqueSounds().some(s => Library.has(s));
     if (any || !idx.sounds.size) return '';
     return `<div class="banner"><div><strong>No music on this device yet.</strong>
-      <p>The buttons below are ready. Load your music folders once and every button lights up.</p></div>
-      <button class="btn admin" data-ui="settings">Load music</button></div>`;
+      <p>The buttons below are ready. Download the music from the team's Google Drive folder and open it in Settings, and every button lights up.</p></div>
+      <button class="btn admin" data-ui="drive">Load music</button></div>`;
   },
   renderMain() {
     this.itemsById.clear();
@@ -1548,6 +1580,340 @@ const Share = {
   },
 };
 
+/* ==================================================================== 10b. GOOGLE DRIVE DOWNLOADS AND SYNC */
+
+/* Zip reading, for folders downloaded from Google Drive (Drive zips a folder when you
+   download it, in parts of about 2 GB). Only the zip's table of contents is read up front;
+   each song is pulled out when it's copied, so a 2 GB zip never has to fit in memory. */
+const AUDIO_TYPES = { mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', flac: 'audio/flac', opus: 'audio/ogg', webm: 'audio/webm' };
+const audioType = name => AUDIO_TYPES[String(name).split('.').pop().toLowerCase()] || '';
+
+const Zip = {
+  async entries(file) {
+    const tailLen = Math.min(file.size, 65557 + 20);
+    const tail = new DataView(await file.slice(file.size - tailLen).arrayBuffer());
+    let e = -1;
+    for (let i = tail.byteLength - 22; i >= 0; i--) if (tail.getUint32(i, true) === 0x06054b50) { e = i; break; }
+    if (e < 0) throw new Error('zip:bad'); // no table of contents: usually a download that stopped early
+    let count = tail.getUint16(e + 10, true), cdSize = tail.getUint32(e + 12, true), cdOff = tail.getUint32(e + 16, true);
+    if (count === 0xffff || cdSize === 0xffffffff || cdOff === 0xffffffff) { // zip64
+      const loc = e - 20;
+      if (loc < 0 || tail.getUint32(loc, true) !== 0x07064b50) throw new Error('zip:bad');
+      const at = Number(tail.getBigUint64(loc + 8, true));
+      const z = new DataView(await file.slice(at, at + 56).arrayBuffer());
+      if (z.getUint32(0, true) !== 0x06064b50) throw new Error('zip:bad');
+      count = Number(z.getBigUint64(32, true)); cdSize = Number(z.getBigUint64(40, true)); cdOff = Number(z.getBigUint64(48, true));
+    }
+    if (cdOff + cdSize > file.size) throw new Error('zip:incomplete');
+    const cd = new DataView(await file.slice(cdOff, cdOff + cdSize).arrayBuffer());
+    const utf8 = new TextDecoder('utf-8');
+    const out = [];
+    let p = 0;
+    for (let n = 0; n < count && p + 46 <= cd.byteLength; n++) {
+      if (cd.getUint32(p, true) !== 0x02014b50) throw new Error('zip:bad');
+      const flags = cd.getUint16(p + 8, true), method = cd.getUint16(p + 10, true);
+      const time = cd.getUint16(p + 12, true), date = cd.getUint16(p + 14, true);
+      let csize = cd.getUint32(p + 20, true), usize = cd.getUint32(p + 24, true);
+      const nl = cd.getUint16(p + 28, true), xl = cd.getUint16(p + 30, true), cl = cd.getUint16(p + 32, true);
+      let off = cd.getUint32(p + 42, true);
+      const name = utf8.decode(new Uint8Array(cd.buffer, cd.byteOffset + p + 46, nl)).replace(/\\/g, '/');
+      for (let x = p + 46 + nl, end = x + xl; x + 4 <= end;) { // zip64 sizes and offsets
+        const id = cd.getUint16(x, true), sz = cd.getUint16(x + 2, true);
+        if (id === 1) {
+          let q = x + 4;
+          if (usize === 0xffffffff) { usize = Number(cd.getBigUint64(q, true)); q += 8; }
+          if (csize === 0xffffffff) { csize = Number(cd.getBigUint64(q, true)); q += 8; }
+          if (off === 0xffffffff) { off = Number(cd.getBigUint64(q, true)); q += 8; }
+        }
+        x += 4 + sz;
+      }
+      p += 46 + nl + xl + cl;
+      if (name.endsWith('/') || /(^|\/)(__MACOSX|\.)/.test(name)) continue; // folders and hidden files
+      const mtime = new Date(1980 + (date >> 9), ((date >> 5) & 15) - 1, date & 31, time >> 11, (time >> 5) & 63, (time & 31) * 2);
+      out.push({ file, name, method, csize, usize, off, flags, mtime });
+    }
+    return out;
+  },
+  async blob(en, type = '') {
+    if (en.flags & 1) throw new Error('zip:encrypted');
+    const h = new DataView(await en.file.slice(en.off, en.off + 30).arrayBuffer());
+    if (h.byteLength < 30 || h.getUint32(0, true) !== 0x04034b50) throw new Error('zip:bad');
+    const start = en.off + 30 + h.getUint16(26, true) + h.getUint16(28, true);
+    if (start + en.csize > en.file.size) throw new Error('zip:incomplete');
+    const raw = en.file.slice(start, start + en.csize);
+    if (en.method === 0) return new Blob([raw], { type });
+    if (en.method !== 8) throw new Error('zip:method');
+    if (typeof DecompressionStream !== 'function') throw new Error('zip:unsupported');
+    let out;
+    try { out = await new Response(raw.stream().pipeThrough(new DecompressionStream('deflate-raw'))).blob(); }
+    catch (e) { throw new Error(e instanceof TypeError && /deflate-raw|not supported|Unsupported/i.test(e.message) ? 'zip:unsupported' : 'zip:bad'); }
+    if (en.usize && out.size !== en.usize) throw new Error('zip:bad');
+    return new Blob([out], { type });
+  },
+};
+
+/* Two ways in, one plan and one copy step:
+   - fromFiles: zip files (or a layout file and loose songs) downloaded from Google Drive.
+     Drive decides who can download, so the folder can stay private. This is the normal way.
+   - check: reads a folder shared as "Anyone with the link" with an API key, no sign-in.
+     Hidden unless DRIVE.key is filled in.
+   Reads the shared Drive folder with an API key (no sign-in), so it only sees files
+   shared as "Anyone with the link". Check builds a plan (new layout? which songs are
+   new or changed?); Run downloads it. Songs already on the device are skipped, so a
+   sync that was interrupted (screen locked, wifi dropped) picks up where it stopped. */
+const Drive = {
+  busy: false,
+  stopped: false,
+  plan: null,
+
+  folderId() {
+    const v = String(settings.driveFolder || '').trim();
+    const m = v.match(/folders\/([\w-]{10,})/) || v.match(/[?&]id=([\w-]{10,})/) || v.match(/^([\w-]{10,})$/);
+    return m ? m[1] : DRIVE.folder;
+  },
+  key() { return String(settings.driveKey || DRIVE.key || '').trim(); },
+  ready() { return !!(this.folderId() && this.key()); },
+  url(path, params = {}) {
+    const u = new URL(path, settings.driveApi || DRIVE.api);
+    u.searchParams.set('key', this.key());
+    u.searchParams.set('supportsAllDrives', 'true');
+    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+    return u.toString();
+  },
+  async get(path, params) {
+    let r;
+    try { r = await fetch(this.url(path, params), { cache: 'no-store' }); }
+    catch (e) { throw new Error('drive:offline'); }
+    if (!r.ok) {
+      let reason = '';
+      try { const j = await r.json(); reason = j.error?.errors?.[0]?.reason || j.error?.details?.[0]?.reason || j.error?.status || ''; } catch (e) {}
+      throw new Error(`drive:${r.status}:${reason}`);
+    }
+    return r;
+  },
+  // every file under the folder, with its path inside it ("Hockey Songs/Rock/Song.mp3")
+  async listAll() {
+    const out = [];
+    const queue = [{ id: this.folderId(), path: '' }];
+    while (queue.length) {
+      const f = queue.shift();
+      let token = '';
+      do {
+        const p = { q: `'${f.id}' in parents and trashed = false`, pageSize: '1000', includeItemsFromAllDrives: 'true',
+          fields: 'nextPageToken,files(id,name,mimeType,size,md5Checksum,modifiedTime)' };
+        if (token) p.pageToken = token;
+        const j = await (await this.get('files', p)).json();
+        for (const x of j.files || []) {
+          const path = f.path ? `${f.path}/${x.name}` : x.name;
+          if (x.mimeType === 'application/vnd.google-apps.folder') queue.push({ id: x.id, path });
+          else out.push({ id: x.id, name: x.name, path, size: +x.size || 0, md5: x.md5Checksum || '', modifiedTime: x.modifiedTime || '' });
+        }
+        token = j.nextPageToken || '';
+      } while (token);
+    }
+    return out;
+  },
+
+  async check(say) {
+    if (!this.ready()) throw new Error('drive:nokey');
+    say('Looking at the Google Drive folder…');
+    const folder = await (await this.get('files/' + this.folderId(), { fields: 'id,name' })).json();
+    const files = await this.listAll();
+    const songs = files.filter(f => AUDIO_EXT.test(f.name));
+    const layouts = files.filter(f => /\.rinkside\.json$/i.test(f.name))
+      .sort((a, b) => (a.path.includes('/') - b.path.includes('/')) || b.modifiedTime.localeCompare(a.modifiedTime));
+    const layout = layouts[0] || null;
+    const last = settings.driveLayout;
+    const layoutNew = !!layout && !(last && last.id === layout.id && last.modifiedTime === layout.modifiedTime);
+
+    say(`Comparing ${songs.length} songs with this device…`);
+    const manifest = (await Store.get('kv', 'driveManifest')) || {};
+    const tail = k => k.split('/').slice(-2).join('/');
+    const get = [], update = [], tails = new Set();
+    for (const s of songs) {
+      const key = norm(s.path);
+      tails.add(tail(key));
+      const have = Library.byTail.get(tail(key));
+      s.load = () => this.get('files/' + s.id, { alt: 'media' }).then(r => r.blob());
+      if (!have) { get.push({ ...s, key }); continue; }
+      const m = manifest[have];
+      let changed;
+      if (m) changed = s.md5 && m.md5 ? s.md5 !== m.md5 : s.size !== m.size;
+      else { // loaded from a folder or show pack: same size means same file
+        const b = await Library.blobByKey(have);
+        changed = !!b && !!s.size && b.size !== s.size;
+        if (!changed) manifest[have] = { id: s.id, md5: s.md5, size: s.size };
+      }
+      if (changed) update.push({ ...s, key, old: have });
+    }
+    await Store.put('kv', 'driveManifest', manifest).catch(() => {});
+    const local = [...new Set([...(await Store.keys('audio')), ...Library.mem.keys()])];
+    const extra = songs.length ? local.filter(k => !tails.has(tail(k))) : []; // never offer to empty the device
+    if (layout) layout.load = () => this.get('files/' + layout.id, { alt: 'media' }).then(r => r.text());
+    this.plan = { source: 'drive', folder, layout, layoutNew, songs, get, update, extra };
+    return this.plan;
+  },
+
+  // Plan an import from files picked on the device: Drive zips, a layout file, loose songs.
+  async fromFiles(files, say) {
+    const songs = [], layouts = [];
+    for (const f of files) {
+      if (/\.zip$/i.test(f.name) || f.type === 'application/zip' || f.type === 'application/x-zip-compressed') {
+        say(`Reading ${f.name}…`);
+        for (const en of await Zip.entries(f)) {
+          if (AUDIO_EXT.test(en.name)) songs.push({ path: en.name, name: en.name.split('/').pop(), size: en.usize, load: () => Zip.blob(en, audioType(en.name)) });
+          else if (/\.rinkside\.json$/i.test(en.name)) layouts.push({ path: en.name, name: en.name.split('/').pop(), when: en.mtime, load: async () => (await Zip.blob(en)).text() });
+        }
+      } else if (AUDIO_EXT.test(f.name)) {
+        songs.push({ path: f.webkitRelativePath || f.name, name: f.name, size: f.size, load: async () => f });
+      } else if (/\.json$/i.test(f.name) && f.size < 20e6) {
+        layouts.push({ path: f.name, name: f.name, when: new Date(f.lastModified || Date.now()), load: () => f.text() });
+      }
+    }
+    if (!songs.length && !layouts.length) throw new Error('files:none');
+    // the layout nearest the top of the folder wins, then the newest
+    const depth = l => l.path.split('/').length;
+    layouts.sort((a, b) => depth(a) - depth(b) || b.when - a.when);
+    const layout = layouts[0] || null;
+    let layoutShow = null, layoutNew = false;
+    if (layout) {
+      layoutShow = Show.normalise(JSON.parse((await layout.load()).replace(/^﻿/, '')));
+      layout.modifiedTime = layout.when.toISOString();
+      layoutNew = JSON.stringify(layoutShow) !== JSON.stringify(show);
+    }
+    say(`Comparing ${songs.length} songs with this device…`);
+    const seen = new Set(), get = [], update = [], tails = new Set(), bases = new Set();
+    for (const s of songs) {
+      const key = norm(s.path);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const parts = key.split('/');
+      const tl = parts.slice(-2).join('/'), base = parts[parts.length - 1];
+      tails.add(tl); bases.add(base);
+      // with a folder, match folder/file exactly; a loose song matches by file name
+      const have = parts.length > 1 ? Library.byTail.get(tl) : Library.byBase.get(base);
+      if (!have) { get.push({ ...s, key }); continue; }
+      const b = await Library.blobByKey(have);
+      if (b && s.size && b.size !== s.size) update.push({ ...s, key, old: have });
+    }
+    // songs on the device that aren't in this download: only worth removing after a whole-folder download
+    const local = [...new Set([...(await Store.keys('audio')), ...Library.mem.keys()])];
+    const extra = songs.length >= 20 ? local.filter(k => { const p = k.split('/'); return !tails.has(p.slice(-2).join('/')) && !(p.length === 1 && bases.has(k)); }) : [];
+    this.plan = { source: 'files', layout, layoutShow, layoutNew, songs, get, update, extra, files: files.length };
+    return this.plan;
+  },
+
+  async run(opts, say, meter) {
+    const plan = this.plan;
+    if (!plan || this.busy) return '';
+    this.busy = true; this.stopped = false;
+    const gb = n => n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB';
+    const jobs = opts.songs ? [...plan.get, ...plan.update] : [];
+    const total = jobs.reduce((n, f) => n + f.size, 0);
+    let bytes = 0, done = 0, failed = 0, full = false, lastErr = null;
+    try {
+      try { await navigator.storage?.persist?.(); } catch (e) {}
+      try {
+        const est = await navigator.storage?.estimate?.();
+        if (est && est.quota && est.quota - est.usage < total * 1.05) {
+          throw new Error(`drive:room:${gb(total)}:${gb(Math.max(0, est.quota - est.usage))}`);
+        }
+      } catch (e) { if (String(e.message).startsWith('drive:room')) throw e; }
+
+      // the layout first: it's small, and it's the part people notice
+      let newShow = null;
+      if (opts.layout && plan.layout) {
+        say('Reading the layout…');
+        newShow = plan.layoutShow || Show.normalise(JSON.parse((await plan.layout.load()).replace(/^\uFEFF/, '')));
+      }
+
+      const manifest = (await Store.get('kv', 'driveManifest')) || {};
+      const removeOld = [];
+      const worker = async () => {
+        while (jobs.length && !this.stopped) {
+          const f = jobs.shift();
+          try {
+            const blob = await f.load();
+            if (f.size && blob.size !== f.size) throw new Error('drive:short');
+            if (!(await Library.putBlob(f.key, blob, false))) {
+              if (Library.lastError?.name === 'QuotaExceededError') { full = true; this.stopped = true; }
+              throw Library.lastError || new Error('store');
+            }
+            manifest[f.key] = { id: f.id || '', md5: f.md5 || '', size: f.size };
+            if (f.old && f.old !== f.key) { removeOld.push(f.old); delete manifest[f.old]; }
+          } catch (e) {
+            failed++; lastErr = e;
+            if (/drive:(403|429):.*(Quota|RateLimit|rateLimit|quota)/.test(e.message)) this.stopped = true;
+          }
+          done++; bytes += f.size;
+          meter(total ? bytes / total : done / Math.max(1, done + jobs.length));
+          say(`${plan.source === 'drive' ? 'Downloading' : 'Adding'} songs: ${done} of ${done + jobs.length} (${gb(bytes)} of ${gb(total)})…`);
+          if (done % 10 === 0) await Store.put('kv', 'driveManifest', manifest).catch(() => {});
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+      await Store.put('kv', 'driveManifest', manifest).catch(() => {});
+      if (removeOld.length) await Library.remove(removeOld);
+
+      let pruned = 0;
+      if (opts.prune && !this.stopped && plan.extra.length) {
+        say('Removing songs that are no longer in Drive…');
+        await Library.remove(plan.extra);
+        for (const k of plan.extra) delete manifest[k];
+        await Store.put('kv', 'driveManifest', manifest).catch(() => {});
+        pruned = plan.extra.length;
+      }
+
+      if (newShow) {
+        setShow(newShow);
+        await Store.put('kv', 'show', show).catch(() => {});
+        settings.driveLayout = { id: plan.layout.id || '', name: plan.layout.name, modifiedTime: plan.layout.modifiedTime };
+        Prefs.save();
+      }
+      UI.renderAll();
+
+      const got = done - failed;
+      const again = plan.source === 'drive' ? 'Tap Check for updates' : 'Open the same download again';
+      const parts = [];
+      if (newShow) parts.push(`Layout updated (${plan.layout.name}).`);
+      if (got) parts.push(`${got} song${got === 1 ? '' : 's'} ${plan.source === 'drive' ? 'downloaded' : 'added'}.`);
+      if (pruned) parts.push(`${pruned} old song${pruned === 1 ? '' : 's'} removed.`);
+      const left = jobs.length + failed;
+      if (full) parts.push(`This device ran out of storage space with ${left} songs left. Free up space (deleting the downloaded zip files helps), then ${again.toLowerCase()}.`);
+      else if (this.stopped && jobs.length) parts.push(`Stopped with ${left} songs left. ${again} to finish. Songs already added are kept.`);
+      else if (failed && /^zip:/.test(lastErr?.message || '')) parts.push(`${failed} song${failed === 1 ? '' : 's'} couldn't be read. ${Drive.explain(lastErr)}`);
+      else if (failed) parts.push(`${failed} song${failed === 1 ? '' : 's'} didn't ${plan.source === 'drive' ? 'download' : 'copy'}${lastErr && /drive:(403|429)/.test(lastErr.message) ? ' (Google is limiting downloads right now)' : ''}. ${again} to try again.`);
+      if (!parts.length) parts.push('Everything is already up to date.');
+      else if (!left) parts.push('Everything is up to date.');
+      return parts.join(' ');
+    } finally {
+      this.busy = false;
+      this.plan = null;
+    }
+  },
+
+  // plain-English message for a failed check or download
+  explain(err) {
+    const m = String(err && err.message || err || '');
+    if (m === 'drive:nokey') return 'Google Drive isn\'t set up on this copy yet. The organizer adds the API key under “Drive connection”.';
+    if (m === 'drive:offline') return 'Can\'t reach Google Drive. Check the wifi and try again.';
+    if (m.startsWith('drive:room:')) { const [, , need, free] = m.split(':'); return `Not enough storage space: the download needs ${need} and the app has about ${free} free. Free up space on the device and try again.`; }
+    if (/drive:400:.*(keyInvalid|API_KEY_INVALID|badRequest)/i.test(m) || /drive:400/.test(m)) return 'Google says the API key isn\'t valid. Check it under “Drive connection”.';
+    if (/accessNotConfigured|SERVICE_DISABLED/i.test(m)) return 'The Google Drive API isn\'t turned on for this API key. Turn it on in Google Cloud (step 3 of the setup).';
+    if (/referer|REFERRER|API_KEY_HTTP_REFERRER_BLOCKED|API_KEY_SERVICE_BLOCKED/i.test(m)) return 'This API key isn\'t allowed to be used from here. Check its restrictions in Google Cloud.';
+    if (/drive:404/.test(m)) return 'Can\'t find the Drive folder. Make sure it\'s shared as “Anyone with the link – Viewer”, and that the folder link is right.';
+    if (/drive:(403|429)/.test(m) && /quota|ratelimit/i.test(m)) return 'Google is limiting downloads from this folder right now. Try again in an hour or so.';
+    if (/drive:403/.test(m)) return 'Google Drive refused access. Make sure the folder is shared as “Anyone with the link – Viewer”.';
+    if (m === 'zip:bad' || m === 'zip:incomplete') return 'That zip file looks incomplete or damaged. The download probably didn\'t finish: delete it and download it again.';
+    if (m === 'zip:encrypted') return 'That zip file is password-protected. Download the folder from Google Drive again.';
+    if (m === 'zip:unsupported' || m === 'zip:method') return 'This browser can\'t open that kind of zip file. Update the browser (Chrome, or iOS 16.4 or newer), or unzip it and use Add music folder.';
+    if (m === 'files:none') return 'Nothing to add. Pick the zip files you downloaded from Google Drive (a layout file or song files work too).';
+    if (err && (err.name === 'NotReadableError' || err.name === 'NotFoundError' || err.name === 'SecurityError')) return 'The device wouldn\'t let the app read that file. Make sure the download finished, and pick it from Downloads (not from inside Google Drive).';
+    if (err instanceof SyntaxError || m === 'not a show') return 'The layout file in Drive isn\'t a valid Rinkside layout. Save it again from the app and upload it.';
+    return 'Something went wrong talking to Google Drive. Try again.';
+  },
+};
+
 /* ==================================================================== 11. SETTINGS, HELP, STARTUP */
 
 const Settings = {
@@ -1633,6 +1999,7 @@ const Settings = {
       say('Copying songs…');
       try {
         const { failed } = await Share.apply(p, say);
+        settings.driveLayout = null; Prefs.save();
         say(failed
           ? `Opened “${show.name}”, but ${failed} of ${p.files.length} songs couldn't be saved on this device (it may be out of space). They'll work until the app is closed. Free up space and open the pack again.`
           : `Opened “${show.name}”.`);
@@ -1647,13 +2014,13 @@ const Settings = {
     $('#resetShow').addEventListener('click', e => {
       Edit.armed(e.currentTarget, 'Tap again to replace your show with the built-in one', async () => {
         const s = await builtInShow();
-        if (s) { setShow(s); await Store.put('kv', 'show', show).catch(() => {}); this.render(); UI.toast('Built-in show restored.'); }
+        if (s) { setShow(s); settings.driveLayout = null; Prefs.save(); await Store.put('kv', 'show', show).catch(() => {}); this.render(); UI.toast('Built-in show restored.'); }
         else UI.toast('This copy has no built-in show.');
       });
     });
     $('#blankShow').addEventListener('click', e => {
       Edit.armed(e.currentTarget, 'Tap again to start an empty show', async () => {
-        setShow(Show.blank()); await Store.put('kv', 'show', show).catch(() => {}); this.render(); UI.toast('New empty show started.');
+        setShow(Show.blank()); settings.driveLayout = null; Prefs.save(); await Store.put('kv', 'show', show).catch(() => {}); this.render(); UI.toast('New empty show started.');
       });
     });
     $('#teamList').addEventListener('click', e => {
@@ -1679,6 +2046,99 @@ const Settings = {
     }
     // iPhone/iPad can't pick a whole folder: use Add music files or a show pack there
     if (IS_IOS || !('webkitdirectory' in document.createElement('input'))) $('#folderBtn').hidden = true;
+    this.initDrive();
+  },
+
+  initDrive() {
+    const say = m => { $('#driveProgress').textContent = m; };
+    const meter = p => { $('#driveMeter i').style.width = (Math.max(0, Math.min(1, p)) * 100).toFixed(1) + '%'; };
+    const busy = on => {
+      $('#driveCheck').disabled = on; $('#driveFiles').disabled = on;
+      $('#driveFilesBtn').classList.toggle('disabled', on);
+      $('#driveMeter').hidden = !on; $('#driveStopRow').hidden = !on;
+      document.body.classList.toggle('syncing', on);
+    };
+    const gb = n => n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB';
+    const date = iso => iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+
+    const showPlan = p => {
+      const songBytes = [...p.get, ...p.update].reduce((n, f) => n + f.size, 0);
+      const nSongs = p.get.length + p.update.length;
+      const lines = [];
+      lines.push(p.source === 'drive'
+        ? `Found ${p.songs.length} songs${p.layout ? ' and a layout' : ''} in “${p.folder.name}”.`
+        : `Found ${p.songs.length} song${p.songs.length === 1 ? '' : 's'}${p.layout ? ' and a layout' : ''} in ${p.files === 1 ? 'the file' : `the ${p.files} files`} you picked.`);
+      if (!p.layout) lines.push('There\'s no layout file (.rinkside.json), so only songs will be added.');
+      $('#driveLayoutRow').hidden = !p.layoutNew;
+      $('#driveLayoutOpt').checked = true;
+      if (p.layoutNew) $('#driveLayoutLbl').textContent = `Update the layout: ${p.layout.name}, saved ${date(p.layout.modifiedTime)}. It replaces the buttons and playlists on this device.`;
+      $('#driveSongsRow').hidden = !nSongs;
+      $('#driveSongsOpt').checked = true;
+      const verb = p.source === 'drive' ? 'Download' : 'Add';
+      if (nSongs) $('#driveSongsLbl').textContent = `${verb} ${p.get.length ? `${p.get.length} new` : ''}${p.get.length && p.update.length ? ' and ' : ''}${p.update.length ? `${p.update.length} changed` : ''} song${nSongs === 1 ? '' : 's'} (${gb(songBytes)})`;
+      $('#drivePruneRow').hidden = !p.extra.length;
+      $('#drivePruneOpt').checked = false;
+      if (p.extra.length) $('#drivePruneLbl').textContent = `Also remove ${p.extra.length} song${p.extra.length === 1 ? '' : 's'} from this device that ${p.extra.length === 1 ? 'isn\'t' : 'aren\'t'} in ${p.source === 'drive' ? 'Drive' : 'this download'} any more${p.source === 'drive' ? '' : ' (only if you downloaded the whole folder, all parts)'}`;
+      if (!p.layoutNew && !nSongs && !p.extra.length) { say('Everything in it is already on this device.'); return; }
+      if (!p.layoutNew && p.layout) lines.push('The layout on this device is already the same.');
+      if (!nSongs) lines.push('All the songs are already on this device.');
+      $('#drivePlanText').textContent = lines.join(' ');
+      $('#driveGo').textContent = p.source === 'drive' ? 'Download now' : 'Add to this device';
+      $('#drivePlan').hidden = false;
+      say('');
+      $('#drivePlan').scrollIntoView({ block: 'center' });
+    };
+    const plan = async make => {
+      if (Drive.busy) return;
+      $('#drivePlan').hidden = true;
+      busy(true); $('#driveStopRow').hidden = true; meter(0);
+      try { showPlan(await make()); }
+      catch (err) { console.error(err); say(Drive.explain(err)); }
+      finally { busy(false); }
+      this.renderDrive();
+    };
+    $('#driveCheck').addEventListener('click', () => plan(() => Drive.check(say)));
+    $('#driveFiles').addEventListener('change', e => {
+      const files = [...e.target.files];
+      e.target.value = '';
+      if (files.length) plan(() => Drive.fromFiles(files, say));
+    });
+    $('#driveNo').addEventListener('click', () => { $('#drivePlan').hidden = true; Drive.plan = null; });
+    $('#driveGo').addEventListener('click', async () => {
+      const opts = {
+        layout: !$('#driveLayoutRow').hidden && $('#driveLayoutOpt').checked,
+        songs: !$('#driveSongsRow').hidden && $('#driveSongsOpt').checked,
+        prune: !$('#drivePruneRow').hidden && $('#drivePruneOpt').checked,
+      };
+      $('#drivePlan').hidden = true;
+      busy(true); meter(0);
+      try { say(await Drive.run(opts, say, meter)); }
+      catch (err) { console.error(err); say(Drive.explain(err)); }
+      finally { busy(false); }
+      this.render();
+    });
+    $('#driveStop').addEventListener('click', () => { Drive.stopped = true; say('Stopping after the songs in progress…'); });
+    const conn = (id, key) => {
+      const el = $('#' + id);
+      el.value = settings[key] || '';
+      el.addEventListener('change', () => { settings[key] = el.value.trim(); Prefs.save(); this.renderDrive(); });
+    };
+    conn('driveFolder', 'driveFolder');
+    conn('driveKey', 'driveKey');
+    // Leaving the app mid-download (or a screen lock on iPhone) can pause it. Say how to finish.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && Drive.busy) say($('#driveProgress').textContent + ' (If this stopped moving, tap Stop and start it again. Songs already added are kept.)');
+    });
+  },
+  renderDrive() {
+    const L = settings.driveLayout;
+    const parts = [];
+    // online checking only appears once a Google API key is built in or entered (see DRIVE)
+    const online = Drive.ready();
+    $('#driveCheck').hidden = !online;
+    $('#driveConn').hidden = !online && !DRIVE.key;
+    if (L) parts.push(`Layout on this device: ${L.name}, saved ${new Date(L.modifiedTime).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}.`);
+    $('#driveLast').textContent = parts.join(' ');
   },
   async render() {
     const uniq = Show.uniqueSounds();
@@ -1688,6 +2148,8 @@ const Settings = {
     $('#missingCount').textContent = missing.length;
     $('#missingList').innerHTML = missing.slice(0, 400).map(s => `<li>${esc(s.file)}</li>`).join('');
     $('#storageWarn').hidden = !!Store.db;
+    this.renderDrive();
+    renderAbout();
     $('#showName').value = show.name;
     $('#teamList').innerHTML = show.teams.map(t => `<div class="team-line">${Teams.badge(t)}<b>${esc(t.full)}</b><button class="mini" data-edit-team="${esc(t.id)}">${ICONS.pen}Edit</button></div>`).join('');
     try {
@@ -1697,6 +2159,13 @@ const Settings = {
   },
   open() { this.render(); $('#settings').showModal(); },
 };
+
+// "Rinkside Soundboard v2.0 · Layout: Hockey-Game-Day.rinkside.json (Oct 6, 2026)": tells you over the phone what a tablet has
+function renderAbout() {
+  const L = settings.driveLayout;
+  const layout = L ? `${L.name} (${new Date(L.modifiedTime).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })})` : show.name;
+  document.querySelectorAll('[data-about]').forEach(el => { el.textContent = `Rinkside Soundboard v${APP_VERSION} · Layout: ${layout}`; });
+}
 
 async function builtInShow() {
   const embedded = document.getElementById('default-show'); // present in the single-file version
