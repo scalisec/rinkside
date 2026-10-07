@@ -30,7 +30,7 @@ will warn you.
 **iPhone or iPad.** The single file can't run on an iPhone or iPad: use Option B.
 Open the web address in Safari > Share > **Add to Home Screen**, and always open it
 from that icon (Safari may clear saved music for websites that aren't on the Home
-Screen). Load music with **Add music files** (no folder picking on iPhone/iPad) or
+Screen). Load music with **Add music folder** (iOS 18.4 or newer), **Add music files**, or
 open a show pack made on an Android tablet or a computer.
 
 **Option B: a web address that installs like an app.** See "Hosting" below.

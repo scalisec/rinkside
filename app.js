@@ -2044,8 +2044,8 @@ const Settings = {
         UI.refreshPads();
       });
     }
-    // iPhone/iPad can't pick a whole folder: use Add music files or a show pack there
-    if (IS_IOS || !('webkitdirectory' in document.createElement('input'))) $('#folderBtn').hidden = true;
+    // Folder picking works in Chrome, Edge and Safari (iPhone/iPad from iOS 18.4). Hide it only where the browser can't do it.
+    if (!('webkitdirectory' in document.createElement('input'))) $('#folderBtn').hidden = true;
     this.initDrive();
   },
 
