@@ -112,7 +112,7 @@ Pages > set the branch to `v1.0-stable`.
 
 ## Running a game
 
-- **Pick the team** at the top left. The big GOAL! button, Pregame and Game music follow the team.
+- **Pick the team** with the team button at the top left (it opens a list of all teams). The big GOAL! button, Pregame and Game music follow the team.
 - **Tap a button to play it**, and tap it again to fade it out.
 - **Fade out all** (big red button) at puck drop. **Stop** cuts everything instantly.
 - **Game music**: the first tap starts the team's playlist, and every tap after that plays the next song.
@@ -155,7 +155,7 @@ many songs matched.
 | Game over | One random button per group (Home win, Visitor win…) |
 | All goal horns | Every button with "Goal Horn" in its name |
 
-**Goal horn and team playlists.** In Edit, tap a team name at the top (or the
+**Goal horn and team playlists.** In Edit, tap the team button at the top and pick a team (or the
 GOAL! button). Pick the goal horn, pregame playlist and game-music playlist.
 Upload or change the logo and colour here too.
 

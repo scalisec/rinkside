@@ -28,7 +28,7 @@
     </div>
     <button id="newGame" class="btn admin">New game</button>
     <button id="editBtn" class="btn admin edit-toggle" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></svg><span>Edit</span></button>
-    <button id="settingsBtn" class="btn icon admin" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></button>
+    <button id="settingsBtn" class="btn icon admin" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <button id="fullBtn" class="btn icon" aria-pressed="false" aria-label="Full screen" title="Full screen" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     <button id="helpBtn" class="btn icon" aria-label="Help" title="Help"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/></svg></button>
     <button id="lockBtn" class="btn lock" aria-pressed="false" aria-label="Lock controls for volunteers"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span>Lock</span></button>
@@ -74,6 +74,18 @@
       <button id="driveCheck" class="btn primary" hidden>Check for updates</button>
       <button id="driveSwitch" class="btn" hidden>Switch Google account</button>
     </div>
+    <div id="driveStatus" class="drive-status">
+    <div id="drivePlan" class="confirm" hidden>
+      <p id="drivePlanText"></p>
+      <label class="setting" id="driveLayoutRow"><span id="driveLayoutLbl"></span><input id="driveLayoutOpt" type="checkbox" checked></label>
+      <label class="setting" id="driveSongsRow"><span id="driveSongsLbl"></span><input id="driveSongsOpt" type="checkbox" checked></label>
+      <label class="setting" id="drivePruneRow"><span id="drivePruneLbl"></span><input id="drivePruneOpt" type="checkbox"></label>
+      <div class="row"><button id="driveGo" class="btn primary">Add to this device</button><button id="driveNo" class="btn">Cancel</button></div>
+    </div>
+    <div id="driveMeter" class="meter" hidden role="progressbar" aria-label="Progress"><i></i></div>
+    <div class="row" id="driveStopRow" hidden><button id="driveStop" class="btn">Stop</button></div>
+    <p id="driveProgress" class="progress drive-progress" aria-live="polite"></p>
+    </div>
     <div id="publishBox" class="publish" hidden>
       <h4>Organizer: publish to Drive</h4>
       <p class="hint">Sends this device's layout, and any songs you've added, to the team's Drive folder. New songs go into the matching category folder under Hockey Songs. Nothing in Drive is deleted, and Drive keeps earlier layouts in its version history. Volunteers get the changes when they tap Check for updates.</p>
@@ -98,16 +110,6 @@
       </ol>
       <p class="hint">Next time, download just the layout file and any song folders that changed. Downloading Hockey Songs again is fine too: songs already on this device are skipped.</p>
     </details>
-    <div id="drivePlan" class="confirm" hidden>
-      <p id="drivePlanText"></p>
-      <label class="setting" id="driveLayoutRow"><span id="driveLayoutLbl"></span><input id="driveLayoutOpt" type="checkbox" checked></label>
-      <label class="setting" id="driveSongsRow"><span id="driveSongsLbl"></span><input id="driveSongsOpt" type="checkbox" checked></label>
-      <label class="setting" id="drivePruneRow"><span id="drivePruneLbl"></span><input id="drivePruneOpt" type="checkbox"></label>
-      <div class="row"><button id="driveGo" class="btn primary">Add to this device</button><button id="driveNo" class="btn">Cancel</button></div>
-    </div>
-    <div id="driveMeter" class="meter" hidden><i></i></div>
-    <div class="row" id="driveStopRow" hidden><button id="driveStop" class="btn">Stop</button></div>
-    <p id="driveProgress" class="progress" aria-live="polite"></p>
     <p id="driveLast" class="hint"></p>
     <details id="driveConn" hidden><summary>Drive connection (organizer)</summary>
       <label class="field">Google Drive folder link<input id="driveFolder" type="url" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the team folder"></label>
@@ -177,7 +179,7 @@
     <p class="version-line" data-version></p>
     <h3>Running a game (volunteers)</h3>
     <ul class="steps">
-      <li><b>Pick the team</b> at the top left. The big GOAL! button, Pregame and Game music follow the team.</li>
+      <li><b>Pick the team</b>: tap the team button at the top left and choose from the list. The big GOAL! button, Pregame and Game music follow the team.</li>
       <li><b>Tap a button to play it.</b> Tap it again to fade it out.</li>
       <li><b>Fade out all</b> (big red button) when the puck drops. <b>Stop</b> cuts everything instantly.</li>
       <li><b>Game music</b>: the first tap starts the team's playlist. Every tap after that plays the next song.</li>
@@ -206,7 +208,7 @@
       <p>They come from button names. The Penalty group plays a random song from every button whose name starts with “Penalty”, on any tab. To add a song to a group, rename its button, for example “Penalty - Sabotage - Beastie Boys”. To remove it, rename it without the word at the start.</p>
       <p>To make a new group, go to Game Day, tap <b>Edit</b>, then <b>Edit groups</b> next to Whistles, Moments or Game over. Give it a label and the starting text to match. The count next to each group shows how many songs it found.</p></details>
     <details><summary>How do I change the goal horn or a team's playlists?</summary>
-      <p>In Edit, tap the team name at the top (or the big GOAL! button). Choose the goal horn, the pregame playlist and the game music playlist. Only buttons with “Goal Horn” in their name show up as goal horns.</p></details>
+      <p>In Edit, tap the team button at the top and choose the team (or <b>Add a team</b>), or tap the big GOAL! button. Choose the goal horn, the pregame playlist and the game music playlist. Only buttons with “Goal Horn” in their name show up as goal horns.</p></details>
     <details><summary>How do I make or change a playlist?</summary>
       <p>In Edit, open a tab and tap <b>Add playlist</b>, or tap an existing playlist button. Search for songs and tap them to add. Use the arrows to change the order and ✕ to remove a song. The songs stay on their own tabs too.</p></details>
     <details><summary>How do I add, rename or reorder tabs?</summary>

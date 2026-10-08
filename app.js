@@ -45,7 +45,7 @@ const DEFAULTS = {
   driveLayout: null,       // { id, name, modifiedTime } of the last layout loaded from Drive
 };
 
-const APP_VERSION = '2.1.2';
+const APP_VERSION = '2.2.0';
 
 /* Google Drive sync (Settings › Update from Google Drive).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -688,15 +688,9 @@ const UI = {
     }));
     this.renderMode();
 
-    $('#teams').addEventListener('click', e => {
-      const b = e.target.closest('[data-team]');
-      if (!b) return;
-      if (Edit.on) { Edit.team(show.teams.find(t => t.id === b.dataset.team)); return; }
-      if (b.dataset.team === settings.team) return;
-      settings.team = b.dataset.team; Prefs.save();
-      Teams.apply(); this.renderHead(); this.renderMain(); this.renderDock();
-      this.toast(`${Teams.current.full} selected.`);
-    });
+    // Team picker: one button showing the current team; tap it for a list of all teams.
+    // In Edit, the list opens a team's settings instead, and has "Add a team".
+    $('#teams').addEventListener('click', () => this.teamMenu(true));
 
     const ng = $('#newGame');
     ng.addEventListener('click', () => {
@@ -839,8 +833,9 @@ const UI = {
   renderHead() {
     const uniq = Show.uniqueSounds();
     const loaded = uniq.filter(s => Library.has(s)).length;
-    $('#teams').innerHTML = show.teams.map(t => `<button class="team" data-team="${esc(t.id)}" aria-pressed="${t.id === Teams.current.id}"
-      style="--tc:${esc(t.color)}">${Teams.badge(t)}<span class="team-name">${esc(t.name)}</span></button>`).join('');
+    const cur = Teams.current;
+    $('#teams').innerHTML = `<button class="team tpick" aria-haspopup="menu" aria-expanded="false" aria-label="Team: ${esc(cur.full)}. Change team"
+      style="--tc:${esc(cur.color)}">${Teams.badge(cur)}<span class="team-name">${esc(cur.name)}</span><svg class="caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>`;
     $('#projMeta').innerHTML = `<span>${loaded}/${uniq.length} songs</span><span>${played.size} played</span>`;
     $('#search').placeholder = `Search ${uniq.length} songs`;
     const ng = $('#newGame');
@@ -1054,6 +1049,40 @@ const UI = {
     list.innerHTML = html;
     document.body.classList.toggle('has-audio', visible.length > 0);
     this.updateProgress();
+  },
+  teamMenu(open) {
+    document.querySelector('.tmenu')?.remove(); document.querySelector('.tscrim')?.remove();
+    const btn = $('#teams .tpick');
+    if (btn) btn.setAttribute('aria-expanded', String(!!open));
+    if (!open) return;
+    const r = btn.getBoundingClientRect();
+    const scrim = Object.assign(document.createElement('div'), { className: 'tscrim' });
+    const m = document.createElement('div');
+    m.className = 'tmenu'; m.setAttribute('role', 'menu');
+    m.style.left = Math.max(8, Math.min(r.left, innerWidth - 290)) + 'px';
+    m.style.top = (r.bottom + 6) + 'px';
+    const cur = Teams.current.id;
+    m.innerHTML = `<h4>${Edit.on ? 'Edit a team' : 'Team'}</h4>` + show.teams.map(t => `<button class="trow${t.id === cur ? ' on' : ''}" role="menuitemradio" aria-checked="${t.id === cur}" data-team="${esc(t.id)}">
+        ${Teams.badge(t)}<span>${esc(t.name)}<small>${esc(t.full)}</small></span>${Edit.on ? `<span class="tick">${ICONS.pen}</span>` : (t.id === cur ? '<span class="tick">✓</span>' : '')}</button>`).join('')
+      + (Edit.on ? `<button class="trow add" role="menuitem" data-add-team>${ICONS.plus}<span>Add a team</span></button>` : '');
+    document.body.append(scrim, m);
+    const close = () => { this.teamMenu(false); btn.focus(); };
+    scrim.addEventListener('click', close);
+    m.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+    m.addEventListener('click', e => {
+      const add = e.target.closest('[data-add-team]');
+      const row = e.target.closest('[data-team]');
+      if (!add && !row) return;
+      this.teamMenu(false);
+      if (add) { Edit.team(Teams.current); setTimeout(() => $('[data-act="teamAdd"]')?.click(), 0); return; }
+      const id = row.dataset.team;
+      if (Edit.on) { Edit.team(show.teams.find(t => t.id === id)); return; }
+      if (id === settings.team) return;
+      settings.team = id; Prefs.save();
+      Teams.apply(); this.renderHead(); this.renderMain(); this.renderDock();
+      this.toast(`${Teams.current.full} selected.`);
+    });
+    (m.querySelector('.trow.on') || m.querySelector('.trow'))?.focus();
   },
   toast(msg) {
     const el = $('#toast');
@@ -2080,7 +2109,7 @@ const Drive = {
           }
           done++; bytes += f.size;
           meter(total ? bytes / total : done / Math.max(1, done + jobs.length));
-          say(`${plan.source === 'drive' ? 'Downloading' : 'Adding'} songs: ${done} of ${done + jobs.length} (${gb(bytes)} of ${gb(total)})…`);
+          say(`${plan.source === 'drive' ? 'Downloading' : 'Adding'} songs: ${done} of ${done + jobs.length} · ${total ? Math.round(bytes / total * 100) : 100}% (${gb(bytes)} of ${gb(total)})`);
           if (done % 10 === 0) await Store.put('kv', 'driveManifest', manifest).catch(() => {});
         }
       };
@@ -2293,12 +2322,25 @@ const Settings = {
 
   initDrive() {
     const say = m => { $('#driveProgress').textContent = m; };
-    const meter = p => { $('#driveMeter i').style.width = (Math.max(0, Math.min(1, p)) * 100).toFixed(1) + '%'; };
+    // the bar: an animated "working" stripe while checking, then it fills as songs arrive
+    const meter = p => {
+      const m = $('#driveMeter');
+      m.classList.remove('working');
+      const pct = Math.max(0, Math.min(1, p)) * 100;
+      m.querySelector('i').style.width = pct.toFixed(1) + '%';
+      m.setAttribute('aria-valuenow', String(Math.round(pct)));
+      m.dataset.pct = Math.round(pct) + '%';
+    };
     const busy = on => {
       $('#driveCheck').disabled = on; $('#driveFiles').disabled = on; $('#drivePublish').disabled = on;
+      if (on) { $('#driveCheck').dataset.label = $('#driveCheck').textContent; $('#driveCheck').textContent = 'Working…'; }
+      else if ($('#driveCheck').dataset.label) { $('#driveCheck').textContent = $('#driveCheck').dataset.label; delete $('#driveCheck').dataset.label; }
       $('#driveFilesBtn').classList.toggle('disabled', on);
       $('#driveMeter').hidden = !on; $('#driveStopRow').hidden = !on;
+      if (on) { const m = $('#driveMeter'); m.classList.add('working'); m.dataset.pct = ''; m.querySelector('i').style.width = ''; }
       document.body.classList.toggle('syncing', on);
+      // keep it in view: the progress sits right under the buttons
+      if (on) setTimeout(() => $('#driveStatus').scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 30);
     };
     const gb = n => n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB';
     const date = iso => iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
@@ -2334,7 +2376,7 @@ const Settings = {
     const plan = async make => {
       if (Drive.busy) return;
       $('#drivePlan').hidden = true;
-      busy(true); $('#driveStopRow').hidden = true; meter(0);
+      busy(true); $('#driveStopRow').hidden = true; // the bar shows "working" until the plan is ready
       try { showPlan(await make()); }
       catch (err) {
         if (err.message === 'drive:signin' && Auth.enabled()) { // off to Google's sign-in page, then straight back here
@@ -2350,7 +2392,7 @@ const Settings = {
     $('#drivePublish').addEventListener('click', async () => {
       if (Drive.busy) return;
       $('#pubPlan').hidden = true; $('#drivePlan').hidden = true;
-      busy(true); $('#driveStopRow').hidden = true; meter(0);
+      busy(true); $('#driveStopRow').hidden = true;
       try {
         const P = await Drive.publishPlan(say);
         const n = P.uploads.length, bytes = P.uploads.reduce((t, u) => t + u.size, 0);
