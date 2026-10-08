@@ -40,11 +40,12 @@ const DEFAULTS = {
   driveApi: '',            // testing only: a stand-in for Google's server
   driveAuth: '',           // testing only: a stand-in for Google's sign-in page
   driveUpload: '',         // testing only: a stand-in for Google's upload server
-  driveEditor: false,      // the signed-in Google account can edit the Drive folder (organizer): shows Edit and Publish
+  driveEditor: false,      // the signed-in Google account can edit the Drive folder (organizer): shows Publish to Drive
+  localEdits: false,       // this device's layout was edited since it last came from (or went to) Drive
   driveLayout: null,       // { id, name, modifiedTime } of the last layout loaded from Drive
 };
 
-const APP_VERSION = '2.1';
+const APP_VERSION = '2.1.1';
 
 /* Google Drive sync (Settings › Update from Google Drive).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -812,7 +813,7 @@ const UI = {
     if (act === 'groups') Edit.groups(el.dataset.section);
     if (act === 'add-playlist') Edit.addPlaylist(Show.tab(el.dataset.tabId));
     if (act === 'add-next') Edit.addNext(Show.tab(el.dataset.tabId));
-    if (act === 'team') { if (Edit.on || (!settings.locked && !document.body.classList.contains('viewer-only'))) Edit.team(Teams.current); }
+    if (act === 'team') { if (Edit.on || !settings.locked) Edit.team(Teams.current); }
     if (act === 'help') { renderAbout(); $('#help').showModal(); }
   },
 
@@ -1070,7 +1071,9 @@ const Edit = {
 
   toggle(force) {
     const want = force ?? !this.on;
-    if (want && document.body.classList.contains('viewer-only')) { UI.toast('Only the organizer can edit the show.'); return; }
+    if (want && !this.on) this._before = JSON.stringify(show);
+    // leaving Edit: if anything changed, this device now has its own version of the layout
+    if (!want && this.on && this._before && this._before !== JSON.stringify(show)) { settings.localEdits = true; Prefs.save(); }
     this.on = want;
     document.body.classList.toggle('editing', this.on);
     const b = $('#editBtn');
@@ -1919,7 +1922,6 @@ const Drive = {
   setEditor(on) {
     if (settings.driveEditor === on) return;
     settings.driveEditor = on; Prefs.save();
-    if (!on && Edit.on) Edit.toggle(false);
     applyRole();
   },
 
@@ -2018,6 +2020,7 @@ const Drive = {
           r = await this.replace(c.id, blob, 'application/json');
         }
         settings.driveLayout = { id: r.id, name: r.name, modifiedTime: r.modifiedTime };
+        settings.localEdits = false;
         Prefs.save();
         published = `Layout published (${r.name}).`;
       }
@@ -2098,6 +2101,7 @@ const Drive = {
         setShow(newShow);
         await Store.put('kv', 'show', show).catch(() => {});
         settings.driveLayout = { id: plan.layout.id || '', name: plan.layout.name, modifiedTime: plan.layout.modifiedTime };
+        settings.localEdits = false;
         Prefs.save();
       }
       UI.renderAll();
@@ -2237,7 +2241,7 @@ const Settings = {
       say('Copying songs…');
       try {
         const { failed } = await Share.apply(p, say);
-        settings.driveLayout = null; Prefs.save();
+        settings.driveLayout = null; settings.localEdits = false; Prefs.save();
         say(failed
           ? `Opened “${show.name}”, but ${failed} of ${p.files.length} songs couldn't be saved on this device (it may be out of space). They'll work until the app is closed. Free up space and open the pack again.`
           : `Opened “${show.name}”.`);
@@ -2252,13 +2256,13 @@ const Settings = {
     $('#resetShow').addEventListener('click', e => {
       Edit.armed(e.currentTarget, 'Tap again to replace your show with the built-in one', async () => {
         const s = await builtInShow();
-        if (s) { setShow(s); settings.driveLayout = null; Prefs.save(); await Store.put('kv', 'show', show).catch(() => {}); this.render(); UI.toast('Built-in show restored.'); }
+        if (s) { setShow(s); settings.driveLayout = null; settings.localEdits = false; Prefs.save(); await Store.put('kv', 'show', show).catch(() => {}); this.render(); UI.toast('Built-in show restored.'); }
         else UI.toast('This copy has no built-in show.');
       });
     });
     $('#blankShow').addEventListener('click', e => {
       Edit.armed(e.currentTarget, 'Tap again to start an empty show', async () => {
-        setShow(Show.blank()); settings.driveLayout = null; Prefs.save(); await Store.put('kv', 'show', show).catch(() => {}); this.render(); UI.toast('New empty show started.');
+        setShow(Show.blank()); settings.driveLayout = null; settings.localEdits = false; Prefs.save(); await Store.put('kv', 'show', show).catch(() => {}); this.render(); UI.toast('New empty show started.');
       });
     });
     $('#teamList').addEventListener('click', e => {
@@ -2309,7 +2313,8 @@ const Settings = {
       if (!p.layout) lines.push('There\'s no layout file (.rinkside.json), so only songs will be added.');
       $('#driveLayoutRow').hidden = !p.layoutNew;
       $('#driveLayoutOpt').checked = true;
-      if (p.layoutNew) $('#driveLayoutLbl').textContent = `Update the layout: ${p.layout.name}, saved ${date(p.layout.modifiedTime)}. It replaces the buttons and playlists on this device.`;
+      if (p.layoutNew) $('#driveLayoutLbl').textContent = `Update the layout: ${p.layout.name}, saved ${date(p.layout.modifiedTime)}. It replaces the buttons and playlists on this device.`
+        + (settings.localEdits ? ' You changed the layout on this device: those changes will be replaced. Untick this to keep them.' : '');
       $('#driveSongsRow').hidden = !nSongs;
       $('#driveSongsOpt').checked = true;
       const verb = p.source === 'drive' ? 'Download' : 'Add';
@@ -2456,8 +2461,7 @@ const Settings = {
 // With Google sign-in on, only the organizer (an Editor of the Drive folder) can edit and publish.
 // Volunteers can't change the show by accident, and their next update would replace it anyway.
 function applyRole() {
-  const viewer = Auth.enabled() && Auth.canRedirect() && !settings.driveEditor; // a downloaded copy can't sign in, so it isn't restricted
-  document.body.classList.toggle('viewer-only', viewer);
+  // Everyone can edit their own copy; only Editors of the Drive folder can publish it for everyone.
   const pub = $('#publishBox');
   if (pub) pub.hidden = !(Auth.enabled() && settings.driveEditor && Auth.canRedirect());
 }

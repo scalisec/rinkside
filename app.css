@@ -553,7 +553,5 @@ dialog.help { width: min(720px, calc(100% - 32px)); }
 .howto { margin: 6px 0 4px; }
 .howto .steps { margin: 6px 0; padding-left: 20px; }
 .howto .steps li { margin: 6px 0; font-size: 14px; }
-/* Google sign-in roles: volunteers (Viewers of the Drive folder) don't get Edit */
-body.viewer-only #editBtn, body.viewer-only [data-edit-team] { display: none !important; }
 .publish { margin: 12px 0 4px; padding: 12px; border: 1px dashed var(--line, #2a3b4a); border-radius: 12px; display: grid; gap: 8px; }
 .publish h4 { margin: 0; }
