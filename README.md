@@ -70,9 +70,29 @@ buttons in the app (Edit > Add songs, picking the same file), then Settings >
 Save layout file and put it in the Drive folder in place of the old one. Keep
 show packs and other big files out of the Rinkside folder so downloads stay small.
 
-**Optional: checking online with no download.** `Drive.check` can read a folder
-shared as "Anyone with the link" using a Google API key (Drive API v3). It stays
-hidden until `DRIVE.key` at the top of `app.js` is filled in.
+**Download all music / Check for updates (Google sign-in, v2.1).** With
+`DRIVE.clientId` set, Settings shows one button: volunteers sign in with Google
+(full-page redirect, no pop-up), and the app downloads the newest layout and only
+new or changed songs straight from the folder. Only Google accounts the folder is
+shared with can download, and in Google Cloud's "Testing" mode only the listed
+test users can sign in at all. Works from the web address, not the single file.
+
+One-time setup: Google Cloud project > enable Google Drive API > Google Auth
+Platform (External, Testing, add each volunteer as a test user, scope
+`drive.readonly`) > Clients > Web application with origin
+`https://scalisec.github.io` and redirect URI `https://scalisec.github.io/rinkside/`.
+Put the client ID in `DRIVE.clientId`, run `python3 build.py`, publish.
+
+**Publish to Drive (organizer).** Accounts with Editor access to the folder
+(detected from the folder's `capabilities.canAddChildren`) get Edit and a
+**Publish to Drive** button; Viewers get neither. Publishing asks for the full
+`drive` scope (organizer only), uploads songs the layout uses that Drive lacks
+into `Hockey Songs/<category>/`, then replaces the layout file. If any song
+fails, the layout is not published. Nothing in Drive is deleted. Add the
+`.../auth/drive` scope next to `drive.readonly` in Google Auth Platform > Data Access.
+
+(Alternative: `DRIVE.key` reads a folder shared as "Anyone with the link" with an
+API key, no sign-in. Not used, because it can't control who has access.)
 
 ---
 
@@ -180,8 +200,28 @@ is licensed to you, not to them.
 
 ## What's in this folder
 
+See `PROJECT-OVERVIEW.md` for status, decisions and open items.
+
 | File | What it is |
 | --- | --- |
+| `app.js` | All the behaviour, in sections marked with `====` banners. |
+| `app.css` | All the styling. |
+| `body.html` | The page layout, including the Help text. |
+| `show.json` | The built-in show (tabs, buttons, teams, logos). |
+| `build.py` | Rebuilds `index.html` and the single file after you change the files above. |
+| `index.html` | The page for hosting on a web address. |
+| `sw.js`, `manifest.webmanifest`, `icon.svg`, `icon-*.png`, `apple-touch-icon.png` | Let the hosted version install and run offline. |
+| `dist/` | Single-file copies of the app (current, v2.1, and v1 stable). |
+| `docs/guides/` | Volunteer setup guide PDFs (current, previous, archive) and the guide builder in `source/`. |
+| `docs/architecture/` | The architecture diagram page. |
+| `tests/` | A stand-in for Google Drive and sign-in, plus browser tests (sign-in, publish, offline, zip import). |
+| `logos/` | Original logo images (the show file has its own copies). |
+
+To make the edits you did on a tablet the new built-in show: Settings > Save
+layout file, rename it to `show.json`, put it in this folder, and run
+`python3 build.py`.
+
+--- | --- |
 | `dist/Rinkside-Soundboard.html` | The whole app in one file, with the show built in. This is what you email. |
 | `index.html` | The page for hosting on a web address. |
 | `app.js` | All the behaviour, in sections marked with `====` banners. |

@@ -36,21 +36,32 @@ const DEFAULTS = {
   locked: false,           // volunteer lock hides settings and editing
   driveFolder: '',         // Settings › Drive connection: overrides DRIVE.folder on this device
   driveKey: '',            // ...and DRIVE.key
+  driveClient: '',         // Settings › Drive connection: overrides DRIVE.clientId on this device
   driveApi: '',            // testing only: a stand-in for Google's server
+  driveAuth: '',           // testing only: a stand-in for Google's sign-in page
+  driveUpload: '',         // testing only: a stand-in for Google's upload server
+  driveEditor: false,      // the signed-in Google account can edit the Drive folder (organizer): shows Edit and Publish
   driveLayout: null,       // { id, name, modifiedTime } of the last layout loaded from Drive
 };
 
-const APP_VERSION = '2.0';
+const APP_VERSION = '2.1';
 
 /* Google Drive sync (Settings › Update from Google Drive).
-   folder: the shared folder holding the layout file (.rinkside.json) and the music folders.
-           It must be shared as "Anyone with the link – Viewer".
-   key:    a Google Cloud API key restricted to the Google Drive API. It can only read files
-           that are already shared with anyone who has the link. */
+   folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
+   clientId: a Google OAuth client ID ("Web application"). With it, people sign in with their
+             own Google account and can only download the folder if it's shared with them.
+             Access stays under your control: share or un-share the folder person by person.
+   key:      (alternative, only used when clientId is empty) an API key for a folder shared as
+             "Anyone with the link". No sign-in, but no control over who has the link. */
 const DRIVE = {
   folder: '1Yme-C_z7clr8pQZ7nYsY5grGmgk_SL_v',
+  clientId: '158874226220-itgi60humint1n9hgle5ki0u9cm5oshe.apps.googleusercontent.com',
   key: '',
   api: 'https://www.googleapis.com/drive/v3/',
+  upload: 'https://www.googleapis.com/upload/drive/v3/',
+  auth: 'https://accounts.google.com/o/oauth2/v2/auth',
+  scope: 'https://www.googleapis.com/auth/drive.readonly', // everyone: read the shared folder
+  writeScope: 'https://www.googleapis.com/auth/drive',     // organizer only, asked for when publishing
 };
 
 const DEFAULT_SHOW_URL = 'show.json'; // built-in show for the hosted version
@@ -801,7 +812,7 @@ const UI = {
     if (act === 'groups') Edit.groups(el.dataset.section);
     if (act === 'add-playlist') Edit.addPlaylist(Show.tab(el.dataset.tabId));
     if (act === 'add-next') Edit.addNext(Show.tab(el.dataset.tabId));
-    if (act === 'team') { if (Edit.on || !settings.locked) Edit.team(Teams.current); }
+    if (act === 'team') { if (Edit.on || (!settings.locked && !document.body.classList.contains('viewer-only'))) Edit.team(Teams.current); }
     if (act === 'help') { renderAbout(); $('#help').showModal(); }
   },
 
@@ -1058,7 +1069,9 @@ const Edit = {
   cur: null, // what the editor dialog is showing: { kind, ref }
 
   toggle(force) {
-    this.on = force ?? !this.on;
+    const want = force ?? !this.on;
+    if (want && document.body.classList.contains('viewer-only')) { UI.toast('Only the organizer can edit the show.'); return; }
+    this.on = want;
     document.body.classList.toggle('editing', this.on);
     const b = $('#editBtn');
     b.setAttribute('aria-pressed', String(this.on));
@@ -1652,6 +1665,52 @@ const Zip = {
   },
 };
 
+/* Google sign-in, for a Drive folder shared only with named people. Uses Google's full-page
+   sign-in (a redirect, not a pop-up: pop-ups are unreliable in Home Screen apps on iPhone).
+   Google sends the person back here with a one-hour access token, which is kept on this
+   device only. Nothing is ever sent anywhere except to Google. */
+const Auth = {
+  KEY: 'rinkside.google',
+  PENDING: 'rinkside.signin',
+  clientId() { return String(settings.driveClient || DRIVE.clientId || '').trim(); },
+  enabled() { return !!this.clientId(); },
+  canRedirect() { return location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname); },
+  redirectUri() { return location.origin + location.pathname.replace(/index\.html$/, ''); },
+  _entry() {
+    try { const t = JSON.parse(localStorage.getItem(this.KEY) || 'null'); if (t && t.exp > Date.now() + 60000) return t; } catch (e) {}
+    return null;
+  },
+  token() { return this._entry()?.token || null; },
+  // the current sign-in also allows writing to Drive (asked for only when the organizer publishes)
+  canWrite() { return String(this._entry()?.scope || '').split(/\s+/).includes(DRIVE.writeScope); },
+  forget() { try { localStorage.removeItem(this.KEY); } catch (e) {} },
+  // leaves the app for Google's sign-in page; consume() picks up the answer when it comes back
+  signIn(resume, chooseAccount = false, scope = DRIVE.scope) {
+    const state = uid() + uid();
+    try { localStorage.setItem(this.PENDING, JSON.stringify({ state, resume, at: Date.now() })); } catch (e) {}
+    const u = new URL(settings.driveAuth || DRIVE.auth);
+    const q = { client_id: this.clientId(), redirect_uri: this.redirectUri(), response_type: 'token', scope,
+      include_granted_scopes: 'true', state };
+    if (chooseAccount) q.prompt = 'select_account';
+    for (const [k, v] of Object.entries(q)) u.searchParams.set(k, v);
+    location.assign(u.toString());
+  },
+  // called at start-up: handles the "#access_token=…" (or "#error=…") Google sends back
+  consume() {
+    const h = location.hash;
+    if (!/[#&](access_token|error)=/.test(h)) return null;
+    const p = new URLSearchParams(h.slice(1));
+    history.replaceState(null, '', location.pathname + location.search);
+    let pending = null;
+    try { pending = JSON.parse(localStorage.getItem(this.PENDING) || 'null'); localStorage.removeItem(this.PENDING); } catch (e) {}
+    if (!pending || pending.state !== p.get('state') || Date.now() - pending.at > 30 * 60000) return { error: 'state' };
+    if (p.get('error')) return { error: p.get('error'), resume: pending.resume };
+    const ttl = +p.get('expires_in') || 3600;
+    try { localStorage.setItem(this.KEY, JSON.stringify({ token: p.get('access_token'), scope: p.get('scope') || '', exp: Date.now() + ttl * 1000 })); } catch (e) {}
+    return { ok: true, resume: pending.resume };
+  },
+};
+
 /* Two ways in, one plan and one copy step:
    - fromFiles: zip files (or a layout file and loose songs) downloaded from Google Drive.
      Drive decides who can download, so the folder can stay private. This is the normal way.
@@ -1672,18 +1731,26 @@ const Drive = {
     return m ? m[1] : DRIVE.folder;
   },
   key() { return String(settings.driveKey || DRIVE.key || '').trim(); },
-  ready() { return !!(this.folderId() && this.key()); },
+  // online checking is available with a sign-in client ID (web address only) or a link-sharing key
+  ready() { return !!this.folderId() && (Auth.enabled() ? Auth.canRedirect() : !!this.key()); },
   url(path, params = {}) {
     const u = new URL(path, settings.driveApi || DRIVE.api);
-    u.searchParams.set('key', this.key());
+    if (!Auth.enabled()) u.searchParams.set('key', this.key());
     u.searchParams.set('supportsAllDrives', 'true');
     for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
     return u.toString();
   },
   async get(path, params) {
+    const opts = { cache: 'no-store' };
+    if (Auth.enabled()) {
+      const t = Auth.token();
+      if (!t) throw new Error('drive:signin');
+      opts.headers = { Authorization: 'Bearer ' + t };
+    }
     let r;
-    try { r = await fetch(this.url(path, params), { cache: 'no-store' }); }
+    try { r = await fetch(this.url(path, params), opts); }
     catch (e) { throw new Error('drive:offline'); }
+    if (r.status === 401 && Auth.enabled()) { Auth.forget(); throw new Error('drive:signin'); }
     if (!r.ok) {
       let reason = '';
       try { const j = await r.json(); reason = j.error?.errors?.[0]?.reason || j.error?.details?.[0]?.reason || j.error?.status || ''; } catch (e) {}
@@ -1691,9 +1758,47 @@ const Drive = {
     }
     return r;
   },
+  // writes (publishing): always signed in, always with the organizer's write permission
+  async send(method, url, body, headers = {}) {
+    const t = Auth.token();
+    if (!t) throw new Error('drive:signin');
+    let r;
+    try { r = await fetch(url, { method, body, headers: { ...headers, Authorization: 'Bearer ' + t } }); }
+    catch (e) { throw new Error('drive:offline'); }
+    if (r.status === 401) { Auth.forget(); throw new Error('drive:signin'); }
+    if (!r.ok) {
+      let reason = '';
+      try { const j = await r.json(); reason = j.error?.errors?.[0]?.reason || j.error?.status || ''; } catch (e) {}
+      throw new Error(`drive:${r.status}:${reason}`);
+    }
+    return r;
+  },
+  upUrl(path, params = {}) {
+    const u = new URL(path, settings.driveUpload || DRIVE.upload);
+    u.searchParams.set('supportsAllDrives', 'true');
+    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+    return u.toString();
+  },
+  async createFolder(name, parent) {
+    return (await this.send('POST', this.url('files', { fields: 'id,name' }), JSON.stringify({ name, parents: [parent], mimeType: 'application/vnd.google-apps.folder' }),
+      { 'Content-Type': 'application/json; charset=UTF-8' })).json();
+  },
+  // a new file, in two steps: Google gives an upload address, then the bytes go there
+  async uploadNew(name, parent, blob, type) {
+    const init = await this.send('POST', this.upUrl('files', { uploadType: 'resumable', fields: 'id,name,size,md5Checksum,modifiedTime' }),
+      JSON.stringify({ name, parents: [parent] }), { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': type });
+    const loc = init.headers.get('Location');
+    if (!loc) throw new Error('drive:upload');
+    return (await this.send('PUT', loc, blob, { 'Content-Type': type })).json();
+  },
+  // new contents for an existing file (Drive keeps the earlier version in its version history)
+  async replace(id, blob, type) {
+    return (await this.send('PATCH', this.upUrl('files/' + id, { uploadType: 'media', fields: 'id,name,modifiedTime' }), blob, { 'Content-Type': type })).json();
+  },
+
   // every file under the folder, with its path inside it ("Hockey Songs/Rock/Song.mp3")
-  async listAll() {
-    const out = [];
+  async listAll(withFolders = false) {
+    const out = [], folders = [];
     const queue = [{ id: this.folderId(), path: '' }];
     while (queue.length) {
       const f = queue.shift();
@@ -1705,19 +1810,26 @@ const Drive = {
         const j = await (await this.get('files', p)).json();
         for (const x of j.files || []) {
           const path = f.path ? `${f.path}/${x.name}` : x.name;
-          if (x.mimeType === 'application/vnd.google-apps.folder') queue.push({ id: x.id, path });
+          if (x.mimeType === 'application/vnd.google-apps.folder') { queue.push({ id: x.id, path }); folders.push({ id: x.id, name: x.name, path, parent: f.path }); }
           else out.push({ id: x.id, name: x.name, path, size: +x.size || 0, md5: x.md5Checksum || '', modifiedTime: x.modifiedTime || '' });
         }
         token = j.nextPageToken || '';
       } while (token);
     }
-    return out;
+    return withFolders ? { files: out, folders } : out;
+  },
+  pickLayout(files) {
+    return files.filter(f => /\.rinkside\.json$/i.test(f.name))
+      .sort((a, b) => (a.path.includes('/') - b.path.includes('/')) || b.modifiedTime.localeCompare(a.modifiedTime))[0] || null;
   },
 
   async check(say) {
     if (!this.ready()) throw new Error('drive:nokey');
+    if (navigator.onLine === false) throw new Error('drive:offline'); // never send someone to a sign-in page that can't load
+    if (Auth.enabled() && !Auth.token()) throw new Error('drive:signin');
     say('Looking at the Google Drive folder…');
-    const folder = await (await this.get('files/' + this.folderId(), { fields: 'id,name' })).json();
+    const folder = await (await this.get('files/' + this.folderId(), { fields: 'id,name,capabilities(canAddChildren)' })).json();
+    if (Auth.enabled()) this.setEditor(!!folder.capabilities?.canAddChildren);
     const files = await this.listAll();
     const songs = files.filter(f => AUDIO_EXT.test(f.name));
     const layouts = files.filter(f => /\.rinkside\.json$/i.test(f.name))
@@ -1803,6 +1915,124 @@ const Drive = {
     return this.plan;
   },
 
+  // Organizer: Edit and Publish only appear for Google accounts that can edit the Drive folder.
+  setEditor(on) {
+    if (settings.driveEditor === on) return;
+    settings.driveEditor = on; Prefs.save();
+    if (!on && Edit.on) Edit.toggle(false);
+    applyRole();
+  },
+
+  /* Publish: send this device's layout, and any songs it uses that Drive doesn't have yet,
+     to the Drive folder. Songs go into the matching category folder under Hockey Songs.
+     Nothing in Drive is ever deleted. */
+  async publishPlan(say) {
+    if (navigator.onLine === false) throw new Error('drive:offline');
+    if (!Auth.token() || !Auth.canWrite()) throw new Error('drive:needwrite');
+    say('Looking at the Google Drive folder…');
+    const root = this.folderId();
+    const folder = await (await this.get('files/' + root, { fields: 'id,name,capabilities(canAddChildren)' })).json();
+    this.setEditor(!!folder.capabilities?.canAddChildren);
+    if (!folder.capabilities?.canAddChildren) throw new Error('drive:noteditor');
+    const { files, folders } = await this.listAll(true);
+    const layout = this.pickLayout(files);
+    const songsRoot = folders.find(f => !f.parent && f.name.toLowerCase() === 'hockey songs') || { id: root, path: '', name: folder.name };
+    const tails = new Set(), bases = new Set();
+    for (const f of files) if (AUDIO_EXT.test(f.name)) { const k = norm(f.path).split('/'); tails.add(k.slice(-2).join('/')); bases.add(k[k.length - 1]); }
+    say('Comparing this device with Drive…');
+    const uploads = [], seen = new Set();
+    for (const s of Show.uniqueSounds()) {
+      const key = Library.resolve(s);
+      if (!key || seen.has(key)) continue;
+      const orig = String(s.file).replace(/\\/g, '/').split('/').filter(Boolean);
+      const k = norm(s.file).split('/');
+      const there = k.length > 1 ? tails.has(k.slice(-2).join('/')) : bases.has(k[k.length - 1]);
+      if (there) continue;
+      seen.add(key);
+      const blob = await Library.blobByKey(key);
+      if (!blob) continue;
+      const folderName = orig.length > 1 ? orig[orig.length - 2] : (idx.tabOf.get(s.id)?.name || 'New Songs');
+      uploads.push({ key, file: norm(s.file), name: orig[orig.length - 1], folderName, size: blob.size, type: blob.type || audioType(s.file) || 'audio/mpeg' });
+    }
+    let layoutChanged = true;
+    if (layout) {
+      try { layoutChanged = JSON.stringify(Show.normalise(JSON.parse((await (await this.get('files/' + layout.id, { alt: 'media' })).text()).replace(/^﻿/, '')))) !== JSON.stringify(show); } catch (e) {}
+    }
+    if (uploads.length) layoutChanged = true; // the songs' new places go into the layout
+    this.pub = { root, folder, layout, songsRoot, folders, uploads, layoutChanged };
+    return this.pub;
+  },
+
+  async publish(say, meter) {
+    const P = this.pub;
+    if (!P || this.busy) return '';
+    this.busy = true; this.stopped = false;
+    const gb = n => n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB';
+    const total = P.uploads.reduce((n, u) => n + u.size, 0);
+    let done = 0, bytes = 0, failed = 0, lastErr = null;
+    try {
+      const manifest = (await Store.get('kv', 'driveManifest')) || {};
+      const folderFor = async name => {
+        const base = P.songsRoot.path;
+        let f = P.folders.find(x => x.parent === base && x.name.toLowerCase() === name.toLowerCase());
+        if (!f) { const c = await this.createFolder(name, P.songsRoot.id); f = { id: c.id, name: c.name, path: base ? `${base}/${c.name}` : c.name, parent: base }; P.folders.push(f); }
+        return f;
+      };
+      for (const u of P.uploads) {
+        if (this.stopped) break;
+        say(`Uploading songs: ${done + 1} of ${P.uploads.length} (${gb(bytes)} of ${gb(total)})…`);
+        try {
+          const f = await folderFor(u.folderName);
+          const blob = await Library.blobByKey(u.key);
+          const r = await this.uploadNew(u.name, f.id, blob, u.type);
+          // the song now lives at "Category/Song.mp3": point the buttons and the stored copy there
+          const newFile = `${f.name}/${u.name}`, newKey = norm(`${f.path}/${u.name}`);
+          for (const s of idx.sounds.values()) if (norm(s.file) === u.file) s.file = newFile;
+          if (newKey !== u.key) { await Library.putBlob(newKey, blob, false); await Library.remove([u.key]); }
+          manifest[newKey] = { id: r.id, md5: r.md5Checksum || '', size: +r.size || u.size };
+        } catch (e) {
+          failed++; lastErr = e;
+          if (e.message === 'drive:signin' || /drive:(403|429)/.test(e.message)) this.stopped = true;
+        }
+        done++; bytes += u.size;
+        meter(total ? bytes / total : 1);
+      }
+      await Store.put('kv', 'driveManifest', manifest).catch(() => {});
+      Show.changed();
+      await Store.put('kv', 'show', show).catch(() => {});
+      // a layout that points at songs Drive doesn't have would leave volunteers with missing buttons
+      if (failed || this.stopped) {
+        UI.renderAll();
+        const why = lastErr?.message === 'drive:signin' ? ' Your Google sign-in ran out.' : '';
+        return `${done - failed} of ${P.uploads.length} songs uploaded.${why} The layout wasn't published yet, so volunteers won't see half a change. Tap Publish to Drive again to finish.`;
+      }
+      let published = '';
+      if (P.layoutChanged || !P.layout) {
+        say('Publishing the layout…');
+        const blob = new Blob([JSON.stringify(show)], { type: 'application/json' });
+        let r;
+        if (P.layout) r = await this.replace(P.layout.id, blob, 'application/json');
+        else {
+          const c = await (await this.send('POST', this.url('files', { fields: 'id' }), JSON.stringify({ name: 'Hockey-Game-Day.rinkside.json', parents: [P.root], mimeType: 'application/json' }),
+            { 'Content-Type': 'application/json; charset=UTF-8' })).json();
+          r = await this.replace(c.id, blob, 'application/json');
+        }
+        settings.driveLayout = { id: r.id, name: r.name, modifiedTime: r.modifiedTime };
+        Prefs.save();
+        published = `Layout published (${r.name}).`;
+      }
+      UI.renderAll();
+      const parts = [];
+      if (published) parts.push(published);
+      if (P.uploads.length) parts.push(`${P.uploads.length} song${P.uploads.length === 1 ? '' : 's'} uploaded.`);
+      parts.push(published || P.uploads.length ? 'Volunteers get it the next time they tap Check for updates.' : 'Drive already matches this device.');
+      return parts.join(' ');
+    } finally {
+      this.busy = false;
+      this.pub = null;
+    }
+  },
+
   async run(opts, say, meter) {
     const plan = this.plan;
     if (!plan || this.busy) return '';
@@ -1843,7 +2073,7 @@ const Drive = {
             if (f.old && f.old !== f.key) { removeOld.push(f.old); delete manifest[f.old]; }
           } catch (e) {
             failed++; lastErr = e;
-            if (/drive:(403|429):.*(Quota|RateLimit|rateLimit|quota)/.test(e.message)) this.stopped = true;
+            if (/drive:(403|429):.*(Quota|RateLimit|rateLimit|quota)/.test(e.message) || e.message === 'drive:signin') this.stopped = true;
           }
           done++; bytes += f.size;
           meter(total ? bytes / total : done / Math.max(1, done + jobs.length));
@@ -1879,7 +2109,8 @@ const Drive = {
       if (got) parts.push(`${got} song${got === 1 ? '' : 's'} ${plan.source === 'drive' ? 'downloaded' : 'added'}.`);
       if (pruned) parts.push(`${pruned} old song${pruned === 1 ? '' : 's'} removed.`);
       const left = jobs.length + failed;
-      if (full) parts.push(`This device ran out of storage space with ${left} songs left. Free up space (deleting the downloaded zip files helps), then ${again.toLowerCase()}.`);
+      if (lastErr?.message === 'drive:signin') parts.push(`Your Google sign-in ran out with ${left} songs left. Tap Check for updates to sign in again and finish. Songs already downloaded are kept.`);
+      else if (full) parts.push(`This device ran out of storage space with ${left} songs left. Free up space (deleting the downloaded zip files helps), then ${again.toLowerCase()}.`);
       else if (this.stopped && jobs.length) parts.push(`Stopped with ${left} songs left. ${again} to finish. Songs already added are kept.`);
       else if (failed && /^zip:/.test(lastErr?.message || '')) parts.push(`${failed} song${failed === 1 ? '' : 's'} couldn't be read. ${Drive.explain(lastErr)}`);
       else if (failed) parts.push(`${failed} song${failed === 1 ? '' : 's'} didn't ${plan.source === 'drive' ? 'download' : 'copy'}${lastErr && /drive:(403|429)/.test(lastErr.message) ? ' (Google is limiting downloads right now)' : ''}. ${again} to try again.`);
@@ -1895,8 +2126,15 @@ const Drive = {
   // plain-English message for a failed check or download
   explain(err) {
     const m = String(err && err.message || err || '');
+    if (m === 'drive:signin') return 'Sign in with Google to continue.';
+    if (m === 'drive:needwrite') return 'Publishing needs your Google permission to change files in Drive.';
+    if (m === 'drive:noteditor') return 'This Google account can view the team folder but not change it. Only the organizer (an Editor of the folder) can publish.';
+    if (m === 'drive:upload') return 'Google Drive didn\'t accept the upload. Try again.';
+    if (m === 'drive:nosignin') return 'Signing in to Google only works in the installed app (from the web address), not in a downloaded copy of the app. Open the app from your Home Screen icon.';
+    if (Auth.enabled() && /drive:404/.test(m)) return 'Your Google account can\'t see the team\'s music folder. Ask the organizer to share “Hockey Music App” with your Google account, or tap Switch Google account if you signed in with a different one.';
+    if (Auth.enabled() && /drive:403/.test(m) && !/quota|ratelimit/i.test(m)) return 'Google refused access to the music folder for this account. Ask the organizer to check it\'s shared with you, or tap Switch Google account.';
     if (m === 'drive:nokey') return 'Google Drive isn\'t set up on this copy yet. The organizer adds the API key under “Drive connection”.';
-    if (m === 'drive:offline') return 'Can\'t reach Google Drive. Check the wifi and try again.';
+    if (m === 'drive:offline') return 'No internet connection, so updates can\'t be checked right now. The music already on this device still works. Try again on wifi.';
     if (m.startsWith('drive:room:')) { const [, , need, free] = m.split(':'); return `Not enough storage space: the download needs ${need} and the app has about ${free} free. Free up space on the device and try again.`; }
     if (/drive:400:.*(keyInvalid|API_KEY_INVALID|badRequest)/i.test(m) || /drive:400/.test(m)) return 'Google says the API key isn\'t valid. Check it under “Drive connection”.';
     if (/accessNotConfigured|SERVICE_DISABLED/i.test(m)) return 'The Google Drive API isn\'t turned on for this API key. Turn it on in Google Cloud (step 3 of the setup).';
@@ -2053,7 +2291,7 @@ const Settings = {
     const say = m => { $('#driveProgress').textContent = m; };
     const meter = p => { $('#driveMeter i').style.width = (Math.max(0, Math.min(1, p)) * 100).toFixed(1) + '%'; };
     const busy = on => {
-      $('#driveCheck').disabled = on; $('#driveFiles').disabled = on;
+      $('#driveCheck').disabled = on; $('#driveFiles').disabled = on; $('#drivePublish').disabled = on;
       $('#driveFilesBtn').classList.toggle('disabled', on);
       $('#driveMeter').hidden = !on; $('#driveStopRow').hidden = !on;
       document.body.classList.toggle('syncing', on);
@@ -2079,7 +2317,7 @@ const Settings = {
       $('#drivePruneRow').hidden = !p.extra.length;
       $('#drivePruneOpt').checked = false;
       if (p.extra.length) $('#drivePruneLbl').textContent = `Also remove ${p.extra.length} song${p.extra.length === 1 ? '' : 's'} from this device that ${p.extra.length === 1 ? 'isn\'t' : 'aren\'t'} in ${p.source === 'drive' ? 'Drive' : 'this download'} any more${p.source === 'drive' ? '' : ' (only if you downloaded the whole folder, all parts)'}`;
-      if (!p.layoutNew && !nSongs && !p.extra.length) { say('Everything in it is already on this device.'); return; }
+      if (!p.layoutNew && !nSongs && !p.extra.length) { say(p.source === 'drive' ? 'Everything is up to date.' : 'Everything in it is already on this device.'); return; }
       if (!p.layoutNew && p.layout) lines.push('The layout on this device is already the same.');
       if (!nSongs) lines.push('All the songs are already on this device.');
       $('#drivePlanText').textContent = lines.join(' ');
@@ -2093,10 +2331,56 @@ const Settings = {
       $('#drivePlan').hidden = true;
       busy(true); $('#driveStopRow').hidden = true; meter(0);
       try { showPlan(await make()); }
-      catch (err) { console.error(err); say(Drive.explain(err)); }
+      catch (err) {
+        if (err.message === 'drive:signin' && Auth.enabled()) { // off to Google's sign-in page, then straight back here
+          if (!Auth.canRedirect()) { say(Drive.explain('drive:nosignin')); return; }
+          say('Opening Google sign-in…'); Auth.signIn('check'); return;
+        }
+        console.error(err); say(Drive.explain(err));
+      }
       finally { busy(false); }
       this.renderDrive();
     };
+    // Organizer: publish this device's layout and new songs to Drive
+    $('#drivePublish').addEventListener('click', async () => {
+      if (Drive.busy) return;
+      $('#pubPlan').hidden = true; $('#drivePlan').hidden = true;
+      busy(true); $('#driveStopRow').hidden = true; meter(0);
+      try {
+        const P = await Drive.publishPlan(say);
+        const n = P.uploads.length, bytes = P.uploads.reduce((t, u) => t + u.size, 0);
+        if (!n && !P.layoutChanged) { say('Drive already matches this device. Nothing to publish.'); return; }
+        const lines = [];
+        if (P.layoutChanged) lines.push(P.layout ? `Publish this device's layout, replacing ${P.layout.name} in “${P.folder.name}”. Drive keeps the old version in its version history.` : `Publish this device's layout as a new file in “${P.folder.name}”.`);
+        if (n) {
+          const list = P.uploads.slice(0, 6).map(u => `${u.folderName}/${u.name}`).join(', ');
+          lines.push(`Upload ${n} song${n === 1 ? '' : 's'} (${gb(bytes)}): ${list}${n > 6 ? `, and ${n - 6} more` : ''}.`);
+        }
+        lines.push('Nothing in Drive is deleted.');
+        $('#pubPlanText').textContent = lines.join(' ');
+        $('#pubPlan').hidden = false; say('');
+        $('#pubPlan').scrollIntoView({ block: 'center' });
+      } catch (err) {
+        if (['drive:needwrite', 'drive:signin'].includes(err.message) && Auth.enabled()) {
+          if (!Auth.canRedirect()) { say(Drive.explain('drive:nosignin')); return; }
+          say('Opening Google sign-in…'); Auth.signIn('publish', false, DRIVE.writeScope); return;
+        }
+        console.error(err); say(Drive.explain(err));
+      } finally { busy(false); }
+    });
+    $('#pubNo').addEventListener('click', () => { $('#pubPlan').hidden = true; Drive.pub = null; });
+    $('#pubGo').addEventListener('click', async () => {
+      $('#pubPlan').hidden = true;
+      busy(true); $('#driveStopRow').hidden = true; meter(0);
+      try { say(await Drive.publish(say, meter)); }
+      catch (err) { console.error(err); say(Drive.explain(err)); }
+      finally { busy(false); }
+      this.render();
+    });
+    $('#driveSwitch').addEventListener('click', () => {
+      if (Drive.busy) return;
+      Auth.forget(); say('Opening Google sign-in…'); Auth.signIn('check', true);
+    });
     $('#driveCheck').addEventListener('click', () => plan(() => Drive.check(say)));
     $('#driveFiles').addEventListener('change', e => {
       const files = [...e.target.files];
@@ -2124,7 +2408,7 @@ const Settings = {
       el.addEventListener('change', () => { settings[key] = el.value.trim(); Prefs.save(); this.renderDrive(); });
     };
     conn('driveFolder', 'driveFolder');
-    conn('driveKey', 'driveKey');
+    conn('driveClient', 'driveClient');
     // Leaving the app mid-download (or a screen lock on iPhone) can pause it. Say how to finish.
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && Drive.busy) say($('#driveProgress').textContent + ' (If this stopped moving, tap Stop and start it again. Songs already added are kept.)');
@@ -2133,10 +2417,19 @@ const Settings = {
   renderDrive() {
     const L = settings.driveLayout;
     const parts = [];
-    // online checking only appears once a Google API key is built in or entered (see DRIVE)
+    // online checking appears once a sign-in client ID (or a link-sharing key) is set up (see DRIVE)
     const online = Drive.ready();
+    const empty = !Show.uniqueSounds().some(x => Library.has(x));
     $('#driveCheck').hidden = !online;
-    $('#driveConn').hidden = !online && !DRIVE.key;
+    $('#driveCheck').textContent = empty ? 'Download all music' : 'Check for updates';
+    $('#driveSwitch').hidden = !(online && Auth.enabled() && Auth.token());
+    $('#driveFilesBtn').classList.toggle('primary', !online);
+    $('#driveIntroOnline').hidden = !online;
+    $('#driveIntroFiles').hidden = online;
+    $('#driveFilesLead').hidden = !online;
+    // the connection settings are for the organizer (or the optional link-sharing key setup), not volunteers
+    $('#driveConn').hidden = Auth.enabled() ? !settings.driveEditor : (!online && !DRIVE.key);
+    applyRole();
     if (L) parts.push(`Layout on this device: ${L.name}, saved ${new Date(L.modifiedTime).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}.`);
     $('#driveLast').textContent = parts.join(' ');
   },
@@ -2159,6 +2452,15 @@ const Settings = {
   },
   open() { this.render(); $('#settings').showModal(); },
 };
+
+// With Google sign-in on, only the organizer (an Editor of the Drive folder) can edit and publish.
+// Volunteers can't change the show by accident, and their next update would replace it anyway.
+function applyRole() {
+  const viewer = Auth.enabled() && Auth.canRedirect() && !settings.driveEditor; // a downloaded copy can't sign in, so it isn't restricted
+  document.body.classList.toggle('viewer-only', viewer);
+  const pub = $('#publishBox');
+  if (pub) pub.hidden = !(Auth.enabled() && settings.driveEditor && Auth.canRedirect());
+}
 
 // "Rinkside Soundboard v2.0 · Layout: Hockey-Game-Day.rinkside.json (Oct 6, 2026)": tells you over the phone what a tablet has
 function renderAbout() {
@@ -2191,6 +2493,7 @@ async function boot() {
   UI.init();
   Edit.init();
   Settings.init();
+  applyRole();
   $('#help').addEventListener('click', e => { if (e.target.closest('[data-close-help]')) $('#help').close(); });
   await Store.open();
   await Library.load();
@@ -2200,6 +2503,20 @@ async function boot() {
   if (!s) s = Show.blank();
   setShow(s);
   setInterval(tick, 200);
+
+  // back from Google's sign-in page: carry on with what the person tapped
+  const signin = Auth.consume();
+  if (signin) {
+    Settings.open();
+    setTimeout(() => {
+      $('#driveSection').scrollIntoView({ block: 'start' });
+      if (signin.ok && signin.resume === 'check') $('#driveCheck').click();
+      else if (signin.ok && signin.resume === 'publish') $('#drivePublish').click();
+      else $('#driveProgress').textContent = signin.error === 'access_denied'
+        ? 'Google sign-in was cancelled. Tap the button to try again.'
+        : 'Google sign-in didn\'t finish. Tap the button to try again.';
+    }, 60);
+  }
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('sw.js').catch(() => { /* not available here (e.g. preview) */ });

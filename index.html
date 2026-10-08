@@ -68,10 +68,24 @@
   </div>
   <div class="dlg-body">
     <h3 id="driveSection">Update from Google Drive</h3>
-    <p class="hint">Download the music and layout from the team's Google Drive folder (<b>Hockey Music App</b>), then open the downloads here. The app adds the newest layout and only the songs that are new or changed, so updates are quick. Nothing needs unzipping.</p>
+    <p class="hint" id="driveIntroOnline" hidden>Gets the newest layout and any new or changed songs from the team's Google Drive folder (<b>Hockey Music App</b>). You'll sign in with your Google account: only people the organizer has shared the folder with can download. The first time downloads every song (about 2&nbsp;GB), so use good wifi and keep the app open until it finishes.</p>
+    <p class="hint" id="driveIntroFiles">Download the music and layout from the team's Google Drive folder (<b>Hockey Music App</b>), then open the downloads here. The app adds the newest layout and only the songs that are new or changed, so updates are quick. Nothing needs unzipping.</p>
+    <div class="row">
+      <button id="driveCheck" class="btn primary" hidden>Check for updates</button>
+      <button id="driveSwitch" class="btn" hidden>Switch Google account</button>
+    </div>
+    <div id="publishBox" class="publish" hidden>
+      <h4>Organizer: publish to Drive</h4>
+      <p class="hint">Sends this device's layout, and any songs you've added, to the team's Drive folder. New songs go into the matching category folder under Hockey Songs. Nothing in Drive is deleted, and Drive keeps earlier layouts in its version history. Volunteers get the changes when they tap Check for updates.</p>
+      <div class="row"><button id="drivePublish" class="btn">Publish to Drive</button></div>
+      <div id="pubPlan" class="confirm" hidden>
+        <p id="pubPlanText"></p>
+        <div class="row"><button id="pubGo" class="btn primary">Publish now</button><button id="pubNo" class="btn">Cancel</button></div>
+      </div>
+    </div>
+    <p class="hint" id="driveFilesLead" hidden>Or, if you downloaded the files from Drive yourself:</p>
     <div class="row">
       <label class="btn primary file-btn" id="driveFilesBtn">Open Drive download<input id="driveFiles" type="file" multiple accept=".zip,application/zip,application/x-zip-compressed,.json,application/json,audio/*,.mp3,.m4a,.wav"></label>
-      <button id="driveCheck" class="btn" hidden>Check online</button>
     </div>
     <details class="howto"><summary>How to download the folder from Google Drive</summary>
       <ol class="steps">
@@ -97,8 +111,8 @@
     <p id="driveLast" class="hint"></p>
     <details id="driveConn" hidden><summary>Drive connection (organizer)</summary>
       <label class="field">Google Drive folder link<input id="driveFolder" type="url" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the team folder"></label>
-      <label class="field">Google API key<input id="driveKey" type="text" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the built-in key"></label>
-      <p class="hint">The folder must be shared as “Anyone with the link – Viewer”. It should hold the layout file (.rinkside.json) and the music folders. These settings only change this device.</p>
+      <label class="field">Google sign-in client ID<input id="driveClient" type="text" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the built-in one"></label>
+      <p class="hint">The folder holds the layout file (.rinkside.json) and the music folders. Share it with each volunteer's Google account (Viewer). These settings only change this device.</p>
     </details>
 
     <h3>Show</h3>
@@ -172,13 +186,14 @@
     </ul>
 
     <h3>Questions</h3>
-    <details><summary>How do I get the newest songs and layout?</summary>
-      <p>From the team's Google Drive folder (<b>Hockey Music App</b>, shared with you by the organizer), download the <b>Hockey Songs</b> folder and the layout file (<b>Hockey-Game-Day.rinkside.json</b>). Then unlock, open <b>Settings</b>, tap <b>Open Drive download</b> and pick all the downloaded files. The app shows what's new; tap <b>Add to this device</b>. Only new or changed songs are copied.</p>
-      <p>Settings has step-by-step instructions under “How to download the folder from Google Drive”. On a phone or tablet, use the browser's desktop site: the Google Drive app can't download whole folders.</p></details>
+    <details><summary>How do I get the music, and the newest songs and layout?</summary>
+      <p>On good wifi, unlock, open <b>Settings</b> and tap <b>Download all music</b> (the first time) or <b>Check for updates</b> (after that). Sign in with the Google account the organizer shared the music with. The app shows what's new; tap <b>Download now</b>. Only new or changed songs are downloaded, so updates are quick.</p>
+      <p>The first time, Google warns that it hasn't verified the app: tap <b>Continue</b>. If a big download stops (the screen locked, the wifi dropped, or the sign-in ran out after an hour), tap <b>Check for updates</b> again: it carries on where it stopped.</p>
+      <p>Using the downloaded single-file copy instead of the web address? Download the files from Google Drive yourself and use <b>Open Drive download</b>.</p></details>
     <details><summary>How do I publish an update for everyone? (organizer)</summary>
-      <p><b>New songs:</b> put the MP3 in the right category folder inside <b>Hockey Songs</b> in the team's Google Drive folder. To give it a button, open the app on your computer, tap <b>Edit</b>, open the tab and use <b>Add songs</b> to pick that same file (from Google Drive on your computer, or a copy with the same name).</p>
-      <p><b>New layout:</b> after editing, open Settings and tap <b>Save layout file</b>. Put the file (it ends in .rinkside.json) in the Hockey Music App folder, replacing the old one, and keep the name <b>Hockey-Game-Day.rinkside.json</b> so volunteers know which file to download.</p>
-      <p>Everyone gets the changes the next time they download from Drive and open the files in the app.</p></details>
+      <p>Only the organizer can do this: the person with <b>Editor</b> access to the Hockey Music App folder in Google Drive. Volunteers have Viewer access, so they don't see Edit or Publish.</p>
+      <p>Tap <b>Check for updates</b> once so the app knows you're the organizer. Then make your changes in <b>Edit</b> (add songs, playlists, cut points). Open <b>Settings</b> and tap <b>Publish to Drive</b>. The first time, Google asks for permission to change files in Drive. The app shows what it will send (the layout and any new songs), then uploads it. New songs go into the matching category folder under Hockey Songs. Nothing in Drive is deleted, and Drive keeps earlier layouts in its version history (right-click the layout file › Manage versions).</p>
+      <p>Volunteers get the changes the next time they tap <b>Check for updates</b>.</p></details>
     <details><summary>How do I add a new song?</summary>
       <p>Unlock, tap <b>Edit</b>, open the tab you want, and tap <b>Add songs</b>. Pick one or more MP3 files. Each file becomes a button named after the file. Tap the new button to rename it, set its colour and set its start point. Tap <b>Done</b> at the top when you're finished.</p></details>
     <details><summary>How do I make a song start at the good part?</summary>
