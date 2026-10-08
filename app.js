@@ -45,7 +45,7 @@ const DEFAULTS = {
   driveLayout: null,       // { id, name, modifiedTime } of the last layout loaded from Drive
 };
 
-const APP_VERSION = '2.2.1';
+const APP_VERSION = '2.3.0';
 
 /* Google Drive sync (Settings › Update from Google Drive).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -105,6 +105,20 @@ const Store = {
   del(store, key) { return this._req(store, 'readwrite', s => s.delete(key)).catch(() => {}); },
   keys(store) { return this._req(store, 'readonly', s => s.getAllKeys()).then(k => k || []).catch(() => []); },
   clear(store) { return this._req(store, 'readwrite', s => s.clear()).catch(() => {}); },
+  // every key with the size of what's stored under it (songs are Blobs; reading .size doesn't load them)
+  sizes(store) {
+    if (!this.db) return Promise.resolve([]);
+    return new Promise(res => {
+      const out = [];
+      try {
+        const tx = this.db.transaction(store, 'readonly');
+        const r = tx.objectStore(store).openCursor();
+        r.onsuccess = () => { const c = r.result; if (c) { out.push({ key: c.key, size: c.value?.size || 0 }); c.continue(); } };
+        tx.oncomplete = () => res(out);
+        tx.onerror = tx.onabort = () => res(out);
+      } catch (e) { res(out); }
+    });
+  },
 };
 
 const Prefs = {
@@ -268,17 +282,61 @@ const Library = {
     const all = new Set([...(await Store.keys('audio')), ...this.mem.keys()]);
     all.forEach(k => this.add(k));
   },
+  /* Songs being added that are already on this device: the same folder and file name (any
+     parent folders), or, for a loose file with no folder, the same file name and size.
+     Asks once whether to replace the copies on the device or keep them; either way no
+     second copy is saved. items: [{ key, size }]; marks each with .existing and .skip.
+     Returns false if the person cancelled. */
+  async sortDuplicates(items) {
+    if (!Store.db || !items.length) return true;
+    const stored = await Store.sizes('audio');
+    if (!stored.length) return true;
+    const sizeOf = new Map(stored.map(s => [s.key, s.size]));
+    const tailOf = k => k.split('/').slice(-2).join('/');
+    const byTail = new Map(), byBase = new Map();
+    for (const { key } of stored) {
+      if (!byTail.has(tailOf(key))) byTail.set(tailOf(key), key);
+      const base = key.split('/').pop();
+      byBase.set(base, [...(byBase.get(base) || []), key]);
+    }
+    for (const it of items) {
+      const parts = it.key.split('/');
+      if (sizeOf.has(it.key)) it.existing = it.key;
+      else if (parts.length > 1) { const cur = this.byTail.get(tailOf(it.key)); it.existing = cur && sizeOf.has(cur) ? cur : byTail.get(tailOf(it.key)) || null; }
+      else it.existing = (byBase.get(it.key) || []).find(k => sizeOf.get(k) === it.size) || null;
+    }
+    const dup = items.filter(it => it.existing);
+    if (!dup.length) return true;
+    const n = dup.length, all = n === items.length;
+    const choice = await Ask.choose({
+      title: 'Already on this device',
+      text: `${all ? (n === 1 ? 'This song is' : `All ${n} of these songs are`) : `<b>${n} of the ${items.length} songs</b> you picked ${n === 1 ? 'is' : 'are'}`} already on this device. Saving ${n === 1 ? 'it' : 'them'} again would use extra space.`
+        + `<br><br><b>Replace</b> swaps the copies on this device for the files you picked. <b>Keep</b> leaves the copies on this device as they are. Either way, no second copy is saved${all ? '' : `, and the other ${items.length - n} song${items.length - n === 1 ? ' is' : 's are'} added as usual`}.`,
+      list: dup.map(it => it.existing), listLabel: `See the ${n} song${n === 1 ? '' : 's'}`,
+      buttons: [
+        { label: `Replace ${n === 1 ? 'it' : 'them'}`, value: 'replace' },
+        { label: 'Keep the ones on this device', value: 'keep', primary: true },
+        { label: 'Cancel', value: 'cancel' },
+      ],
+    });
+    if (choice === 'cancel') return false;
+    for (const it of dup) { if (choice === 'replace') it.key = it.existing; else it.skip = true; }
+    return true;
+  },
   async importFiles(fileList, onProgress) {
     const files = [...fileList].filter(f => AUDIO_EXT.test(f.name));
+    const items = files.map(f => ({ file: f, key: norm(f.webkitRelativePath || f.name), size: f.size }));
+    if (!(await this.sortDuplicates(items))) return { added: [], failed: 0, cancelled: true };
     const added = [];
     let failed = 0;
     try { await navigator.storage?.persist?.(); } catch (e) {}
-    for (let i = 0; i < files.length; i++) {
-      const f = files[i];
-      const key = norm(f.webkitRelativePath || f.name);
-      if (!(await this.putBlob(key, f))) failed++;
-      added.push({ file: f, key });
-      onProgress?.(i + 1, files.length);
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.skip) { added.push({ file: it.file, key: it.existing, kept: true }); onProgress?.(i + 1, items.length); continue; }
+      if (urlCache.has(it.key)) { URL.revokeObjectURL(urlCache.get(it.key)); urlCache.delete(it.key); }
+      if (!(await this.putBlob(it.key, it.file))) failed++;
+      added.push({ file: it.file, key: it.key, replaced: !!it.existing });
+      onProgress?.(i + 1, items.length);
     }
     return { added, failed };
   },
@@ -301,6 +359,142 @@ async function urlFor(sound) {
   if (urlCache.size > 60) { const [k, u] = urlCache.entries().next().value; URL.revokeObjectURL(u); urlCache.delete(k); }
   return url;
 }
+
+/* A question with a few answers, shown over everything else. Resolves to the chosen value
+   ('cancel' if closed with Escape / Back). */
+const Ask = {
+  choose({ title, text, list = [], listLabel = '', buttons }) {
+    const d = $('#ask'), box = $('#askBtns');
+    $('#askTitle').textContent = title;
+    $('#askText').innerHTML = text;
+    $('#askListWrap').hidden = !list.length; $('#askListWrap').open = false;
+    $('#askListSum').textContent = listLabel;
+    $('#askList').innerHTML = list.slice(0, 500).map(x => `<li>${esc(x)}</li>`).join('') + (list.length > 500 ? `<li>…and ${list.length - 500} more</li>` : '');
+    box.innerHTML = buttons.map((b, i) => `<button type="button" class="btn${b.primary ? ' primary' : ''}" data-i="${i}">${esc(b.label)}</button>`).join('');
+    return new Promise(res => {
+      const done = v => { d.removeEventListener('cancel', onCancel); box.onclick = null; d.close(); res(v); };
+      const onCancel = e => { e.preventDefault(); done('cancel'); };
+      d.addEventListener('cancel', onCancel);
+      box.onclick = e => { const b = e.target.closest('button'); if (b) done(buttons[+b.dataset.i].value); };
+      d.showModal();
+      box.querySelector('.primary')?.focus();
+    });
+  },
+};
+
+const size$ = b => (b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${b > 0 ? Math.max(1, Math.round(b / 1e6)) : 0} MB`);
+
+/* Clean up storage: finds extra copies of songs and songs nothing uses, shows exactly what
+   would be removed, and removes only what the person ticks. Never touches a copy a button
+   plays: of each set of copies, the one downloaded from Drive (or the one playing now) stays. */
+const Cleanup = {
+  plan: null,
+  async scan() {
+    const stored = await Store.sizes('audio');
+    const manifest = (await Store.get('kv', 'driveManifest')) || {};
+    const size = new Map(stored.map(s => [s.key, s.size]));
+    const tailOf = k => k.split('/').slice(-2).join('/');
+    const baseOf = k => k.split('/').pop();
+    // 1. copies of the same song: same folder and file name, whatever folders are above them
+    const groups = new Map();
+    for (const { key } of stored) groups.set(tailOf(key), [...(groups.get(tailOf(key)) || []), key]);
+    // a loose file (no folder) is a copy if a song with the same file name and size is in a folder
+    for (const [t, keys] of [...groups]) {
+      if (t.includes('/')) continue;
+      const k = keys[0];
+      const into = [...groups.entries()].find(([t2, ks]) => t2.includes('/') && baseOf(t2) === t && ks.some(x => size.get(x) === size.get(k)));
+      if (into) { into[1].push(k); groups.delete(t); }
+    }
+    const keep = new Set(), dupes = [];
+    for (const [t, keys] of groups) {
+      if (keys.length === 1) { keep.add(keys[0]); continue; }
+      const now = Library.byTail.get(t);
+      const playing = keys.includes(now) ? now : keys[0];
+      // the team's copy from Drive wins; otherwise keep the one the buttons play now
+      const kept = keys.find(k => manifest[k] && size.get(k) === size.get(playing)) || keys.find(k => manifest[k]) || playing;
+      keep.add(kept);
+      for (const k of keys) if (k !== kept) dupes.push({ key: k, size: size.get(k), kept });
+    }
+    // 2. songs no button or playlist uses, judged with only the kept copies on the device
+    const kTail = new Map(), kBase = new Map();
+    for (const k of keep) { kTail.set(tailOf(k), k); if (!kBase.has(baseOf(k))) kBase.set(baseOf(k), k); }
+    const used = new Set();
+    for (const s of idx.sounds.values()) {
+      const p = keyOf(s).split('/');
+      const k = kTail.get(p.slice(-2).join('/')) || kBase.get(p[p.length - 1]);
+      if (k) used.add(k);
+    }
+    const unused = [], spare = [];
+    for (const k of keep) if (!used.has(k)) (manifest[k] ? spare : unused).push({ key: k, size: size.get(k) });
+    const sum = a => a.reduce((n, x) => n + (x.size || 0), 0);
+    this.plan = { count: stored.length, total: sum(stored), dupes, unused, spare, drive: Object.keys(manifest).length > 0,
+      dupBytes: sum(dupes), unusedBytes: sum(unused) };
+    return this.plan;
+  },
+  render() {
+    const p = this.plan;
+    const s = n => (n === 1 ? '' : 's');
+    const useDup = !$('#cleanDupRow').hidden && $('#cleanDupOpt').checked;
+    const useUnused = !$('#cleanUnusedRow').hidden && $('#cleanUnusedOpt').checked;
+    const n = (useDup ? p.dupes.length : 0) + (useUnused ? p.unused.length : 0);
+    const freed = (useDup ? p.dupBytes : 0) + (useUnused ? p.unusedBytes : 0);
+    const kept = p.count - n;
+    $('#cleanKept').innerHTML = `<b>Kept:</b> ${kept} song${s(kept)} (${size$(p.total - freed)}). Every button and playlist keeps working.`
+      + (p.spare.length ? ` ${p.spare.length} song${s(p.spare.length)} in the team's Drive folder that no button uses yet ${p.spare.length === 1 ? 'is' : 'are'} kept too.` : '')
+      + (!useUnused && p.unused.length ? ` Songs no button uses stay unless you tick them.` : '');
+    $('#cleanAfter').innerHTML = n
+      ? `<b>After:</b> about ${size$(p.total - freed)} used, freeing ${size$(freed)}. This can't be undone on this device, but anything removed can be downloaded again with <b>Check for updates</b> or added again.`
+      : 'Nothing is ticked, so nothing will be removed.';
+    $('#cleanGo').disabled = !n;
+    $('#cleanGo').textContent = n ? `Remove ${n} song${s(n)}` : 'Remove';
+  },
+  show() {
+    const p = this.plan;
+    const s = n => (n === 1 ? '' : 's');
+    const li = (k, extra = '') => `<li>${esc(k.key)} <small>(${size$(k.size)})${extra}</small></li>`;
+    const nothing = !p.dupes.length && !p.unused.length;
+    $('#cleanIntro').innerHTML = `This device has <b>${p.count} song${s(p.count)}</b> using <b>${size$(p.total)}</b>.`
+      + (nothing ? ` Nothing to clean up: there are no extra copies, and every song is on a button${p.drive ? ' or in the team\'s Drive folder' : ''}.` : ' Nothing is removed until you tap Remove.');
+    $('#cleanDupRow').hidden = $('#cleanDupList').hidden = !p.dupes.length;
+    $('#cleanDupLbl').textContent = `Remove ${p.dupes.length} extra cop${p.dupes.length === 1 ? 'y' : 'ies'} (${size$(p.dupBytes)})`;
+    $('#cleanDupOpt').checked = true;
+    $('#cleanDupList ul').innerHTML = p.dupes.slice(0, 600).map(d => li(d, ` · keeping ${esc(d.kept)}`)).join('');
+    $('#cleanUnusedRow').hidden = $('#cleanUnusedList').hidden = !p.unused.length;
+    $('#cleanUnusedLbl').textContent = `Remove ${p.unused.length} song${s(p.unused.length)} no button uses (${size$(p.unusedBytes)})`;
+    $('#cleanUnusedWhy').textContent = p.drive
+      ? 'Not on any button or playlist, and not in the team\'s Drive folder (as of your last Check for updates). If you need one later, add it again.'
+      : 'Not on any button or playlist. If you need one later, add it again.';
+    $('#cleanUnusedOpt').checked = false;
+    $('#cleanUnusedList ul').innerHTML = p.unused.slice(0, 600).map(d => li(d)).join('');
+    $('#cleanDupList').open = $('#cleanUnusedList').open = false;
+    $('#cleanKept').hidden = $('#cleanAfter').hidden = $('#cleanGo').hidden = nothing;
+    $('#cleanNo').textContent = nothing ? 'Close' : 'Cancel';
+    $('#cleanPlan').hidden = false;
+    if (!nothing) this.render();
+  },
+  async run(say) {
+    const p = this.plan;
+    let keys = [...($('#cleanDupOpt').checked ? p.dupes : []), ...($('#cleanUnusedOpt').checked ? p.unused : [])].map(x => x.key);
+    if (!keys.length) return '';
+    if (tracks.some(t => t.state !== 'done')) return 'Stop the music first (Fade out all or Stop), then tap Remove again.';
+    // check again right before removing, in case songs or buttons changed since the summary
+    const now = await this.scan();
+    const still = new Map([...now.dupes, ...now.unused].map(x => [x.key, x]));
+    keys = keys.filter(k => still.has(k));
+    const freed = keys.reduce((n, k) => n + (still.get(k).size || 0), 0);
+    for (let i = 0; i < keys.length; i += 25) {
+      say(`Removing songs: ${Math.min(i + 25, keys.length)} of ${keys.length}…`);
+      await Library.remove(keys.slice(i, i + 25));
+    }
+    // forget Drive details for copies that are gone (and any left over from earlier)
+    const manifest = (await Store.get('kv', 'driveManifest')) || {};
+    const left = new Set(await Store.keys('audio'));
+    for (const k of Object.keys(manifest)) if (!left.has(k)) delete manifest[k];
+    await Store.put('kv', 'driveManifest', manifest).catch(() => {});
+    this.plan = null;
+    return `Removed ${keys.length} song${keys.length === 1 ? '' : 's'} and freed about ${size$(freed)}. Every button that played before still plays.`;
+  },
+};
 
 function probeDuration(blob) {
   return new Promise(res => {
@@ -1485,7 +1679,8 @@ const Edit = {
   async addSongs(tab, files, input) {
     if (!tab || !files || !files.length) return;
     const say = m => { const p = $('#edProgress'); if (p && $('#editor').open) p.textContent = m; else UI.toast(m); };
-    const { added, failed } = await Library.importFiles(files, (i, n) => say(`Adding ${i} of ${n} songs…`));
+    const { added, failed, cancelled } = await Library.importFiles(files, (i, n) => say(`Adding ${i} of ${n} songs…`));
+    if (cancelled) { if (input) input.value = ''; say('Cancelled. Nothing was added.'); return; }
     for (const { file } of added) {
       tab.items.push({
         type: 'sound', id: uid(), name: prettyName(file.name), file: file.webkitRelativePath || file.name,
@@ -1636,8 +1831,12 @@ const Share = {
 
   async apply(parsed, say) {
     try { await navigator.storage?.persist?.(); } catch (e) {}
+    const items = parsed.files.map(f => ({ ...f, size: f.blob.size }));
+    if (!(await Library.sortDuplicates(items))) return { failed: 0, cancelled: true };
     let n = 0, failed = 0;
-    for (const f of parsed.files) {
+    for (const f of items) {
+      if (f.skip) { n++; continue; }
+      if (urlCache.has(f.key)) { URL.revokeObjectURL(urlCache.get(f.key)); urlCache.delete(f.key); }
       if (!(await Library.putBlob(f.key, f.blob))) failed++;
       if (++n % 10 === 0 || n === parsed.files.length) say(`Copying songs ${n} of ${parsed.files.length}…`);
     }
@@ -2221,14 +2420,38 @@ const Settings = {
       const files = e.target.files;
       if (!files || !files.length) return;
       const prog = $('#importProgress');
-      const { added, failed } = await Library.importFiles(files, (i, n) => { prog.textContent = `Saving ${i} of ${n} songs to this device…`; });
-      prog.textContent = failed
-        ? `Added ${added.length} songs for this session. ${failed} couldn't be saved to the device, so load them again next time.`
-        : `Added ${added.length} songs.`;
+      const { added, failed, cancelled } = await Library.importFiles(files, (i, n) => { prog.textContent = `Saving ${i} of ${n} songs to this device…`; });
+      const kept = added.filter(a => a.kept).length, replaced = added.filter(a => a.replaced).length;
+      const fresh = added.length - kept - replaced;
+      const s = n => (n === 1 ? '' : 's');
+      prog.textContent = cancelled ? 'Cancelled. Nothing was added.'
+        : failed ? `Added ${added.length - kept} songs for this session. ${failed} couldn't be saved to the device, so load them again next time.`
+        : [fresh && `Added ${fresh} new song${s(fresh)}.`, replaced && `Replaced ${replaced} song${s(replaced)} already on this device.`, kept && `Kept ${kept} song${s(kept)} already on this device.`].filter(Boolean).join(' ') || 'No song files were picked.';
       e.target.value = '';
       UI.renderAll();
       this.render();
     };
+    // Clean up storage: look first, show what would go, remove only after Remove is tapped
+    const cleanSay = m => { $('#cleanProgress').textContent = m; };
+    $('#cleanCheck').addEventListener('click', async () => {
+      const b = $('#cleanCheck'); b.disabled = true; $('#cleanPlan').hidden = true;
+      cleanSay('Checking the songs on this device…');
+      try { await Cleanup.scan(); cleanSay(''); Cleanup.show(); $('#cleanPlan').scrollIntoView({ block: 'nearest' }); }
+      catch (e) { console.error(e); cleanSay('Couldn\'t check the songs on this device. Try again.'); }
+      b.disabled = false;
+    });
+    $('#cleanDupOpt').addEventListener('change', () => Cleanup.render());
+    $('#cleanUnusedOpt').addEventListener('change', () => Cleanup.render());
+    $('#cleanNo').addEventListener('click', () => { $('#cleanPlan').hidden = true; Cleanup.plan = null; cleanSay(''); });
+    $('#cleanGo').addEventListener('click', async () => {
+      const go = $('#cleanGo'); go.disabled = true;
+      try {
+        const msg = await Cleanup.run(cleanSay);
+        cleanSay(msg);
+        if (!Cleanup.plan) { $('#cleanPlan').hidden = true; UI.renderAll(); this.render(); cleanSay(msg); }
+      } catch (e) { console.error(e); cleanSay('Something went wrong while removing songs. Tap Clean up storage to check again.'); }
+      go.disabled = false;
+    });
     $('#musicFolder').addEventListener('change', onMusic);
     $('#musicFiles').addEventListener('change', onMusic);
     $('#clearMusic').addEventListener('click', e => {
@@ -2295,7 +2518,8 @@ const Settings = {
       $('#confirmOpen').hidden = true;
       say('Copying songs…');
       try {
-        const { failed } = await Share.apply(p, say);
+        const { failed, cancelled } = await Share.apply(p, say);
+        if (cancelled) { say('Cancelled. Nothing was changed.'); this.pending = null; return; }
         settings.driveLayout = null; settings.localEdits = false; Prefs.save();
         say(failed
           ? `Opened “${show.name}”, but ${failed} of ${p.files.length} songs couldn't be saved on this device (it may be out of space). They'll work until the app is closed. Free up space and open the pack again.`

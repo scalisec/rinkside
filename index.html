@@ -130,6 +130,19 @@
       <button id="clearMusic" class="btn">Remove stored music</button>
     </div>
     <p id="importProgress" class="progress" aria-live="polite"></p>
+    <div class="row"><button id="cleanCheck" class="btn">Clean up storage</button></div>
+    <p class="hint">Finds extra copies of songs and songs no button uses, and tells you exactly what would be removed before anything is deleted.</p>
+    <div id="cleanPlan" class="confirm" hidden>
+      <p id="cleanIntro"></p>
+      <label class="setting" id="cleanDupRow"><span><b id="cleanDupLbl"></b><br><small>The same song saved more than once (for example from Add music folder and from Drive). One copy of each is kept (the one from the team's Drive folder when there is one), so every button still plays.</small></span><input id="cleanDupOpt" type="checkbox" checked></label>
+      <details id="cleanDupList" class="clean-list"><summary>See the copies that would be removed</summary><ul></ul></details>
+      <label class="setting" id="cleanUnusedRow"><span><b id="cleanUnusedLbl"></b><br><small id="cleanUnusedWhy"></small></span><input id="cleanUnusedOpt" type="checkbox"></label>
+      <details id="cleanUnusedList" class="clean-list"><summary>See the songs that would be removed</summary><ul></ul></details>
+      <p id="cleanKept"></p>
+      <p id="cleanAfter"></p>
+      <div class="row"><button id="cleanGo" class="btn primary">Remove</button><button id="cleanNo" class="btn">Cancel</button></div>
+    </div>
+    <p id="cleanProgress" class="progress" aria-live="polite"></p>
     <p id="storageWarn" class="hint warn-text" hidden>This copy was opened in a way that can't save music on the device, so you'll need to add your music each time. Opening it from Chrome's Downloads, or from the web address, keeps your music.</p>
     <details id="missingWrap"><summary><span id="missingCount">0</span> songs still missing</summary><ul id="missingList" class="missing-list"></ul></details>
     <p id="storageInfo" class="hint"></p>
@@ -239,6 +252,12 @@
       <p>Bluetooth always adds a short delay. Tap goal horns as soon as the goal is scored. A cable to the sound system has no delay.</p></details>
     <details><summary>Nothing plays.</summary>
       <p>Check the tablet volume and the Master slider. Make sure the Bluetooth speaker is connected before opening the app. Buttons with dashed outlines don't have their song file on this device yet.</p></details>
+    <details><summary>My phone or tablet is running out of space.</summary>
+      <p>Open <b>Settings</b> (the gear), scroll to <b>Music on this device</b> and tap <b>Clean up storage</b>. The app checks your songs and shows what it would remove: extra copies of the same song, and songs no button uses. <b>Nothing is deleted until you tap Remove.</b></p>
+      <p>Extra copies are ticked for you; every button keeps playing. Songs no button uses are only removed if you tick them. Anything removed can be downloaded again with <b>Check for updates</b>.</p>
+      <p>Old downloads also take space: delete <b>.zip</b>, <b>.rinkpack</b> and old <b>Rinkside</b> files from the <b>Files</b> app (iPhone) or <b>Files / My Files</b> (Android).</p></details>
+    <details><summary>It asks “Already on this device”.</summary>
+      <p>Some songs you're adding are already saved. <b>Keep the ones on this device</b> skips them; <b>Replace them</b> swaps in the files you picked. Either way the app doesn't save a second copy. <b>Cancel</b> adds nothing.</p></details>
     <details><summary>It says “A new version of Rinkside is ready.”</summary>
       <p>The app downloaded an update by itself in the background. The message only appears when nothing is playing, so it never interrupts a song.</p>
       <p><b>Update now</b> restarts the app on the new version. It takes a second or two. Your music, buttons and settings stay as they are.</p>
@@ -247,6 +266,16 @@
     <details><summary>I made a mess. Can I undo?</summary>
       <p>Open a layout file you saved earlier (Settings, then Open a layout file). Or use <b>Restore the built-in show</b> to go back to the show this copy came with. Your music stays on the device either way.</p></details>
     <p class="hint about" data-about></p>
+  </div>
+</dialog>
+
+<!-- ============ A question that needs an answer (e.g. songs already on this device) ============ -->
+<dialog id="ask" class="ask" aria-labelledby="askTitle">
+  <div class="dlg-head"><h2 id="askTitle"></h2></div>
+  <div class="dlg-body">
+    <p id="askText"></p>
+    <details id="askListWrap" class="clean-list"><summary id="askListSum"></summary><ul id="askList"></ul></details>
+    <div id="askBtns" class="ask-btns"></div>
   </div>
 </dialog>
 
