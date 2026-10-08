@@ -613,3 +613,7 @@ dialog { max-height: calc(100% - 32px - env(safe-area-inset-top, 0px) - env(safe
 dialog.ask { width: min(480px, calc(100% - 32px)); }
 .ask-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .ask-btns .btn { flex: 1 1 auto; }
+.advanced { margin: 6px 0 10px; border: 1px solid var(--line-solid); border-radius: var(--radius); padding: 0 12px; }
+.advanced > summary { cursor: pointer; padding: 12px 0; font-weight: 600; color: var(--muted); }
+.advanced[open] > summary { color: var(--text); }
+.advanced .share-card { margin-bottom: 12px; }

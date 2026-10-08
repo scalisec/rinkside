@@ -91,8 +91,7 @@ into `Hockey Songs/<category>/`, then replaces the layout file. If any song
 fails, the layout is not published. Nothing in Drive is deleted. Add the
 `.../auth/drive` scope next to `drive.readonly` in Google Auth Platform > Data Access.
 
-(Alternative: `DRIVE.key` reads a folder shared as "Anyone with the link" with an
-API key, no sign-in. Not used, because it can't control who has access.)
+(There is deliberately no "Anyone with the link" mode: access is always per person.)
 
 ---
 
@@ -274,5 +273,5 @@ Plain HTML, CSS and JavaScript. No build tools or libraries beyond Python for `b
 - **Drive imports** (`Zip` and `Drive` in app.js): reads Drive's zip downloads
   in place (stored or deflate via DecompressionStream, zip64, UTF-8 names), picks
   the top-most newest `.rinkside.json`, and compares songs by folder/file name and
-  size. The optional online check uses Drive API v3 with an API key and md5.
+  size. The online check uses Drive API v3 with the person's Google sign-in and md5.
 - **Defaults** (fade lengths and so on) are at the top of `app.js`.

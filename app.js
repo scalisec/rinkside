@@ -35,7 +35,6 @@ const DEFAULTS = {
   team: null,              // selected team id
   locked: false,           // volunteer lock hides settings and editing
   driveFolder: '',         // Settings › Drive connection: overrides DRIVE.folder on this device
-  driveKey: '',            // ...and DRIVE.key
   driveClient: '',         // Settings › Drive connection: overrides DRIVE.clientId on this device
   driveApi: '',            // testing only: a stand-in for Google's server
   driveAuth: '',           // testing only: a stand-in for Google's sign-in page
@@ -45,19 +44,16 @@ const DEFAULTS = {
   driveLayout: null,       // { id, name, modifiedTime } of the last layout loaded from Drive
 };
 
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.4.0';
 
-/* Google Drive sync (Settings › Update from Google Drive).
+/* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
    clientId: a Google OAuth client ID ("Web application"). With it, people sign in with their
              own Google account and can only download the folder if it's shared with them.
-             Access stays under your control: share or un-share the folder person by person.
-   key:      (alternative, only used when clientId is empty) an API key for a folder shared as
-             "Anyone with the link". No sign-in, but no control over who has the link. */
+             Access stays under your control: share or un-share the folder person by person. */
 const DRIVE = {
   folder: '1Yme-C_z7clr8pQZ7nYsY5grGmgk_SL_v',
   clientId: '158874226220-itgi60humint1n9hgle5ki0u9cm5oshe.apps.googleusercontent.com',
-  key: '',
   api: 'https://www.googleapis.com/drive/v3/',
   upload: 'https://www.googleapis.com/upload/drive/v3/',
   auth: 'https://accounts.google.com/o/oauth2/v2/auth',
@@ -356,7 +352,10 @@ async function urlFor(sound) {
   if (!blob) return null;
   const url = URL.createObjectURL(blob);
   urlCache.set(key, url);
-  if (urlCache.size > 60) { const [k, u] = urlCache.entries().next().value; URL.revokeObjectURL(u); urlCache.delete(k); }
+  if (urlCache.size > 60) {
+    // drop the oldest song that isn't one of the always-ready ones (goal horn, whistles)
+    for (const [k, u] of urlCache) if (!Warm.pinned.has(k) && k !== key) { URL.revokeObjectURL(u); urlCache.delete(k); break; }
+  }
   return url;
 }
 
@@ -526,6 +525,30 @@ const Teams = {
     const c = this.current.color;
     document.documentElement.style.setProperty('--team', c);
     document.documentElement.style.setProperty('--on-team', hexLight(c) ? '#0b131a' : '#ffffff');
+    Warm.soon();
+  },
+};
+
+/* Get the songs that must start instantly ready ahead of time: the current team's goal horn
+   and the whistle songs (Penalty, Icing…). Done when the app opens, when the team changes and
+   after music or the layout changes, so the first tap of the night doesn't wait on storage. */
+const Warm = {
+  pinned: new Set(),   // song keys kept ready (never dropped from the ready list)
+  soon() { clearTimeout(this._t); this._t = setTimeout(() => this.run().catch(() => {}), 400); },
+  async run() {
+    const team = show.teams.length ? Teams.current : null;
+    const horn = team ? Teams.goalHorn(team) : null;
+    const whistles = (gameDaySections()[0]?.items || []).flatMap(g => g.sounds || []);
+    const list = [horn, ...whistles].filter(s => s && Library.has(s)).slice(0, 40);
+    this.pinned = new Set(list.map(s => Library.resolve(s)));
+    for (const s of list) await urlFor(s);
+    // the goal horn: let the browser read the start of the file now
+    const key = horn && Library.resolve(horn);
+    if (key && key !== this.hornKey) {
+      this.hornKey = key;
+      const a = new Audio(); a.preload = 'auto'; a.muted = true; a.src = await urlFor(horn); a.load();
+      this.hornEl = a;
+    }
   },
 };
 
@@ -1967,14 +1990,14 @@ const Auth = {
 };
 
 /* Two ways in, one plan and one copy step:
-   - fromFiles: zip files (or a layout file and loose songs) downloaded from Google Drive.
-     Drive decides who can download, so the folder can stay private. This is the normal way.
-   - check: reads a folder shared as "Anyone with the link" with an API key, no sign-in.
-     Hidden unless DRIVE.key is filled in.
-   Reads the shared Drive folder with an API key (no sign-in), so it only sees files
-   shared as "Anyone with the link". Check builds a plan (new layout? which songs are
-   new or changed?); Run downloads it. Songs already on the device are skipped, so a
-   sync that was interrupted (screen locked, wifi dropped) picks up where it stopped. */
+   - check: signs in with the person's Google account and reads the team's private Drive
+     folder. Only accounts the folder is shared with get in. This is the normal way.
+   - fromFiles: zip files (or a layout file and loose songs) downloaded from Google Drive
+     in a browser. Drive still decides who can download.
+   Check builds a plan (new layout? which songs are new or changed?); Run downloads it.
+   Songs already on the device are skipped, so a sync that was interrupted (screen locked,
+   wifi dropped) picks up where it stopped. There is deliberately no "anyone with the
+   link" mode: access is always per person. */
 const Drive = {
   busy: false,
   stopped: false,
@@ -1985,23 +2008,18 @@ const Drive = {
     const m = v.match(/folders\/([\w-]{10,})/) || v.match(/[?&]id=([\w-]{10,})/) || v.match(/^([\w-]{10,})$/);
     return m ? m[1] : DRIVE.folder;
   },
-  key() { return String(settings.driveKey || DRIVE.key || '').trim(); },
-  // online checking is available with a sign-in client ID (web address only) or a link-sharing key
-  ready() { return !!this.folderId() && (Auth.enabled() ? Auth.canRedirect() : !!this.key()); },
+  // online checking needs Google sign-in, which only works from the web address
+  ready() { return !!this.folderId() && Auth.enabled() && Auth.canRedirect(); },
   url(path, params = {}) {
     const u = new URL(path, settings.driveApi || DRIVE.api);
-    if (!Auth.enabled()) u.searchParams.set('key', this.key());
     u.searchParams.set('supportsAllDrives', 'true');
     for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
     return u.toString();
   },
   async get(path, params) {
-    const opts = { cache: 'no-store' };
-    if (Auth.enabled()) {
-      const t = Auth.token();
-      if (!t) throw new Error('drive:signin');
-      opts.headers = { Authorization: 'Bearer ' + t };
-    }
+    const t = Auth.token();
+    if (!t) throw new Error('drive:signin');
+    const opts = { cache: 'no-store', headers: { Authorization: 'Bearer ' + t } };
     let r;
     try { r = await fetch(this.url(path, params), opts); }
     catch (e) { throw new Error('drive:offline'); }
@@ -2079,7 +2097,7 @@ const Drive = {
   },
 
   async check(say) {
-    if (!this.ready()) throw new Error('drive:nokey');
+    if (!this.ready()) throw new Error('drive:nosignin');
     if (navigator.onLine === false) throw new Error('drive:offline'); // never send someone to a sign-in page that can't load
     if (Auth.enabled() && !Auth.token()) throw new Error('drive:signin');
     say('Looking at the Google Drive folder…');
@@ -2389,17 +2407,13 @@ const Drive = {
     if (m === 'drive:noteditor') return 'This Google account can view the team folder but not change it. Only the organizer (an Editor of the folder) can publish.';
     if (m === 'drive:upload') return 'Google Drive didn\'t accept the upload. Try again.';
     if (m === 'drive:nosignin') return 'Signing in to Google only works in the installed app (from the web address), not in a downloaded copy of the app. Open the app from your Home Screen icon.';
-    if (Auth.enabled() && /drive:404/.test(m)) return 'Your Google account can\'t see the team\'s music folder. Ask the organizer to share “Hockey Music App” with your Google account, or tap Switch Google account if you signed in with a different one.';
-    if (Auth.enabled() && /drive:403/.test(m) && !/quota|ratelimit/i.test(m)) return 'Google refused access to the music folder for this account. Ask the organizer to check it\'s shared with you, or tap Switch Google account.';
-    if (m === 'drive:nokey') return 'Google Drive isn\'t set up on this copy yet. The organizer adds the API key under “Drive connection”.';
+    if (/drive:404/.test(m)) return 'Your Google account can\'t see the team\'s music folder. Ask the organizer to share “Hockey Music App” with your Google account, or tap Switch Google account if you signed in with a different one.';
     if (m === 'drive:offline') return 'No internet connection, so updates can\'t be checked right now. The music already on this device still works. Try again on wifi.';
     if (m.startsWith('drive:room:')) { const [, , need, free] = m.split(':'); return `Not enough storage space: the download needs ${need} and the app has about ${free} free. Free up space on the device and try again.`; }
-    if (/drive:400:.*(keyInvalid|API_KEY_INVALID|badRequest)/i.test(m) || /drive:400/.test(m)) return 'Google says the API key isn\'t valid. Check it under “Drive connection”.';
-    if (/accessNotConfigured|SERVICE_DISABLED/i.test(m)) return 'The Google Drive API isn\'t turned on for this API key. Turn it on in Google Cloud (step 3 of the setup).';
-    if (/referer|REFERRER|API_KEY_HTTP_REFERRER_BLOCKED|API_KEY_SERVICE_BLOCKED/i.test(m)) return 'This API key isn\'t allowed to be used from here. Check its restrictions in Google Cloud.';
-    if (/drive:404/.test(m)) return 'Can\'t find the Drive folder. Make sure it\'s shared as “Anyone with the link – Viewer”, and that the folder link is right.';
     if (/drive:(403|429)/.test(m) && /quota|ratelimit/i.test(m)) return 'Google is limiting downloads from this folder right now. Try again in an hour or so.';
-    if (/drive:403/.test(m)) return 'Google Drive refused access. Make sure the folder is shared as “Anyone with the link – Viewer”.';
+    if (/drive:403/.test(m)) return 'Google refused access to the music folder for this account. Ask the organizer to check it\'s shared with you, or tap Switch Google account.';
+    if (/accessNotConfigured|SERVICE_DISABLED/i.test(m)) return 'The Google Drive API isn\'t turned on for the Rinkside project in Google Cloud. The organizer needs to turn it on.';
+    if (/drive:400/.test(m)) return 'Google didn\'t understand the request. Try again; if it keeps happening, tell the organizer.';
     if (m === 'zip:bad' || m === 'zip:incomplete') return 'That zip file looks incomplete or damaged. The download probably didn\'t finish: delete it and download it again.';
     if (m === 'zip:encrypted') return 'That zip file is password-protected. Download the folder from Google Drive again.';
     if (m === 'zip:unsupported' || m === 'zip:method') return 'This browser can\'t open that kind of zip file. Update the browser (Chrome, or iOS 16.4 or newer), or unzip it and use Add music folder.';
@@ -2467,7 +2481,7 @@ const Settings = {
     $('#savePack').addEventListener('click', async () => {
       try { say(await Share.savePack(say)); } catch (err) { console.error(err); say('The show pack couldn\'t be made. Try saving the layout file instead.'); }
     });
-    $('#openShow').addEventListener('change', async e => {
+    const onOpenShow = async e => {
       const f = e.target.files[0];
       e.target.value = '';
       if (!f) return;
@@ -2505,13 +2519,15 @@ const Settings = {
         } else if (m === 'notpack') {
           say(`“${f.name}” isn't a Rinkside show pack. Pick the file that ends in .rinkpack.`);
         } else if (err && (err.name === 'NotReadableError' || err.name === 'NotFoundError' || err.name === 'SecurityError')) {
-          say(`The phone wouldn't let the app read “${f.name}”. Download it to this device first (Part 2 of the guide), then pick it from Downloads.`);
+          say(`The phone wouldn't let the app read “${f.name}”. Save it to this device first (the Files app on iPhone, Downloads on Android), then pick it from there.`);
         } else {
           say(`“${f.name}” isn't a Rinkside layout (.rinkside.json) or show pack (.rinkpack), or it's damaged. Try downloading it again.`);
         }
         prog.scrollIntoView({ block: 'center' });
       }
-    });
+    };
+    $('#openShow').addEventListener('change', onOpenShow);
+    $('#openPack').addEventListener('change', onOpenShow);
     $('#confirmYes').addEventListener('click', async () => {
       const p = this.pending;
       if (!p) return;
@@ -2725,7 +2741,7 @@ const Settings = {
     $('#driveIntroFiles').hidden = online;
     $('#driveFilesLead').hidden = !online;
     // the connection settings are for the organizer (or the optional link-sharing key setup), not volunteers
-    $('#driveConn').hidden = Auth.enabled() ? !settings.driveEditor : (!online && !DRIVE.key);
+    $('#driveConn').hidden = !settings.driveEditor;
     applyRole();
     if (L) parts.push(`Layout on this device: ${L.name}, saved ${new Date(L.modifiedTime).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}.`);
     $('#driveLast').textContent = parts.join(' ');

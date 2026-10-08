@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' https://www.googleapis.com https://*.googleusercontent.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b131a">
 <meta name="application-name" content="Rinkside">
@@ -67,7 +68,7 @@
     <button id="closeSettings" class="btn">Done</button>
   </div>
   <div class="dlg-body">
-    <h3 id="driveSection">Update from Google Drive</h3>
+    <h3 id="driveSection">Get Most Recent Updates</h3>
     <p class="hint" id="driveIntroOnline" hidden>Gets the newest layout and any new or changed songs from the team's Google Drive folder (<b>Hockey Music App</b>). You'll sign in with your Google account: only people the organizer has shared the folder with can download. The first time downloads every song (about 2&nbsp;GB), so use good wifi and keep the app open until it finishes.</p>
     <p class="hint" id="driveIntroFiles">Download the music and layout from the team's Google Drive folder (<b>Hockey Music App</b>), then open the downloads here. The app adds the newest layout and only the songs that are new or changed, so updates are quick. Nothing needs unzipping.</p>
     <div class="row">
@@ -148,29 +149,30 @@
     <p id="storageInfo" class="hint"></p>
 
     <h3>Share and back up</h3>
-    <div class="share-grid">
-      <div class="share-card">
-        <b>Layout file</b>
-        <p class="hint">Tabs, buttons, cut points, playlists, groups, teams and logos. Small enough to email. The other person loads their own copy of the music.</p>
-        <button id="saveLayout" class="btn">Save layout file…</button>
-      </div>
-      <div class="share-card">
-        <b>Full show pack</b>
-        <p class="hint">Everything, including the music on this device. Large (often 1–4 GB): use a USB stick, Google Drive or a cable. Best for setting up another tablet.</p>
-        <button id="savePack" class="btn">Save show pack…</button>
-      </div>
+    <div class="share-card">
+      <b>Layout file</b>
+      <p class="hint">Tabs, buttons, cut points, playlists, groups, teams and logos. Small enough to email. The other person gets the music from the team's Drive folder.</p>
+      <div class="row"><button id="saveLayout" class="btn">Save layout file…</button><label class="btn file-btn">Open a layout file<input id="openShow" type="file"></label></div>
     </div>
     <p class="hint">On a computer (Chrome or Edge), you'll be asked where to save. Phones and tablets save to the Downloads folder.</p>
-    <div class="row"><label class="btn file-btn">Open a layout file or show pack<input id="openShow" type="file"></label></div>
+    <details id="advanced" class="advanced">
+      <summary>Advanced: show packs and starting over</summary>
+      <div class="share-card">
+        <b>Full show pack</b>
+        <p class="hint">Everything, including the music on this device, in one large file (often 1–4 GB). Only needed to copy the app to another device with no internet. Normally use <strong>Check for updates</strong> instead.</p>
+        <div class="row"><button id="savePack" class="btn">Save show pack…</button><label class="btn file-btn">Open a show pack<input id="openPack" type="file"></label></div>
+      </div>
+      <div class="share-card">
+        <b>Start over</b>
+        <p class="hint">Replaces the tabs, buttons and playlists on this device (you'll be asked to tap twice). Your music stays. To get the team's layout back, tap <strong>Check for updates</strong>.</p>
+        <div class="row"><button id="resetShow" class="btn">Restore the built-in show</button><button id="blankShow" class="btn">Start an empty show</button></div>
+      </div>
+    </details>
     <div id="confirmOpen" class="confirm" hidden>
       <p id="confirmText"></p>
       <div class="row"><button id="confirmYes" class="btn primary">Open it</button><button id="confirmNo" class="btn">Cancel</button></div>
     </div>
     <p id="shareProgress" class="progress" aria-live="polite"></p>
-    <div class="row">
-      <button id="resetShow" class="btn">Restore the built-in show</button>
-      <button id="blankShow" class="btn">Start an empty show</button>
-    </div>
 
     <h3>Playback</h3>
     <div class="setting"><span>Fade-out length</span><span id="fadeLenOut" class="num"></span>
@@ -229,12 +231,12 @@
     <details><summary>How do I move or copy a button to another tab?</summary>
       <p>In Edit, tap the button. Change <b>Tab</b> to move it, or use <b>Also put a copy on</b> to show it in two places. Use <b>Move earlier</b> and <b>Move later</b> to change its position.</p></details>
     <details><summary>How do I share this with another volunteer or tablet?</summary>
-      <p>Open Settings, then Share and back up.</p>
-      <p><b>Layout file</b>: small, easy to email. The other person opens the app, taps <b>Open a layout file</b>, then adds their own copy of the music with <b>Add music folder</b>. Songs match by folder and file name, so keep the same file names.</p>
-      <p><b>Show pack</b>: includes the music, so it is large. Copy it with a USB stick, Google Drive or a cable. On the other tablet, tap <b>Open a layout file or show pack</b> and everything is ready.</p>
+      <p>Everyone gets the music and the buttons from the team's Google Drive folder: <b>Settings › Download all music</b> (later, <b>Check for updates</b>). The organizer gives a new volunteer access by sharing the <b>Hockey Music App</b> folder with their Google account.</p>
+      <p><b>Layout file</b> (Settings › Share and back up): small, easy to email. The other person taps <b>Open a layout file</b>; their music still comes from Drive. Songs match by folder and file name.</p>
+      <p><b>Show pack</b> (Settings › Share and back up › <b>Advanced</b>): includes all the music, so it is large (1–4 GB). Only needed to copy the app to a device with no internet. On the other device, open <b>Advanced</b> and tap <b>Open a show pack</b>.</p>
       <p>Save a layout file after big changes. It is also your backup.</p></details>
     <details><summary>Can I edit on my computer instead of the tablet?</summary>
-      <p>Yes. Open the app in Chrome on your computer, make your changes, then save a layout file (or a show pack) and open it on the tablet.</p></details>
+      <p>Yes. Open the app in Chrome on your computer, make your changes, then save a layout file and open it on the tablet. If you're the organizer, you can use <b>Publish to Drive</b> instead so everyone gets them.</p></details>
     <details><summary>Some buttons have dashed outlines and say “File not loaded”.</summary>
       <p>That song file isn't on this device. Open Settings and add your music folder again, or open the button in Edit and choose the file. Settings lists every missing song.</p></details>
     <details><summary>How do I put it on the home screen with the hockey icon?</summary>
@@ -243,11 +245,12 @@
       <p>If you opened it from its web address, the app installs like a real app: no Chrome badge and no address bar.</p></details>
     <details><summary>Can I use it on an iPhone or iPad?</summary>
       <p>Yes, from its web address in <b>Safari</b> (the single downloaded file can't run on an iPhone or iPad). Open the address, tap <b>Share</b>, then <b>Add to Home Screen</b>, and always open it from that icon: Safari can clear a website's saved music if it isn't on the Home Screen.</p>
-      <p>The easiest way to load music is to download Hockey Songs and the layout file from Google Drive in Safari (tap <b>aA</b> › <b>Request Desktop Website</b> first), then use <b>Settings › Open Drive download</b>. You can also use <b>Add music folder</b> (iOS 18.4 or newer) or <b>Add music files</b>, or open a <b>show pack</b> made on another device. If there's no sound while the ring/silent switch is on silent, update iOS.</p>
-      <p>The first download is about 2&nbsp;GB, and the songs then take up the same again in the app until you delete the zip files. Make sure there's room, and keep the screen on (Settings › Display &amp; Brightness › Auto-Lock) until it finishes.</p>
+      <p>To get the music, open <b>Settings › Download all music</b> and sign in with Google. You can also use <b>Open Drive download</b>, <b>Add music folder</b> (iOS 18.4 or newer) or <b>Add music files</b>, or a show pack (Settings › Share and back up › <b>Advanced</b>). If there's no sound while the ring/silent switch is on silent, update iOS.</p>
+      <p>The first download is about 2&nbsp;GB. Make sure there's room, and keep the screen on (Settings › Display &amp; Brightness › Auto-Lock) until it finishes.</p>
       <p>Make show packs on an Android tablet or a computer. Saving a multi-gigabyte pack on an iPhone or iPad may not work.</p></details>
     <details><summary>The tablet screen turns off or locks during the game.</summary>
-      <p>Change the tablet's own setting before the game: <b>Settings &gt; Display &gt; Screen timeout</b>, and pick the longest time (often 10 or 30 minutes). Some tablets also have <b>Settings &gt; Developer options &gt; Stay awake</b>, which keeps the screen on while it's charging.</p></details>
+      <p><b>iPhone / iPad:</b> before the game, open the <b>Settings</b> app › <b>Display &amp; Brightness</b> › <b>Auto-Lock</b> and pick the longest time (or Never).</p>
+      <p><b>Android:</b> change the tablet's own setting before the game: <b>Settings &gt; Display &gt; Screen timeout</b>, and pick the longest time (often 10 or 30 minutes). Some tablets also have <b>Settings &gt; Developer options &gt; Stay awake</b>, which keeps the screen on while it's charging.</p></details>
     <details><summary>The sound is a little late on the Bluetooth speaker.</summary>
       <p>Bluetooth always adds a short delay. Tap goal horns as soon as the goal is scored. A cable to the sound system has no delay.</p></details>
     <details><summary>Nothing plays.</summary>
@@ -264,7 +267,7 @@
       <p><b>Later</b> hides the message and you keep going as normal. The new version is used the next time you open the app.</p>
       <p>The app always opens from the copy saved on your device, so it opens straight away even on weak rink wifi or with no internet.</p></details>
     <details><summary>I made a mess. Can I undo?</summary>
-      <p>Open a layout file you saved earlier (Settings, then Open a layout file). Or use <b>Restore the built-in show</b> to go back to the show this copy came with. Your music stays on the device either way.</p></details>
+      <p>To go back to the team's layout, open Settings and tap <b>Check for updates</b> (it offers the layout from Drive if yours is different). You can also open a layout file you saved earlier (Settings › Share and back up › <b>Open a layout file</b>), or use <b>Restore the built-in show</b> under <b>Advanced</b>. Your music stays on the device either way.</p></details>
     <p class="hint about" data-about></p>
   </div>
 </dialog>
