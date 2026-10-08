@@ -8,7 +8,7 @@
      version downloads in the background and is used the next time the app is opened.
 
    Bump VERSION whenever you change app files. */
-const VERSION = 'rinkside-v24';
+const VERSION = 'rinkside-v25';
 const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'version.js', 'manifest.webmanifest', 'icon.svg', 'show.json', 'release-notes.json',
   'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png',
   'fonts/barlow-latin-400-normal.woff2', 'fonts/barlow-latin-500-normal.woff2', 'fonts/barlow-latin-600-normal.woff2',
