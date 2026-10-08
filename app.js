@@ -45,7 +45,7 @@ const DEFAULTS = {
   driveLayout: null,       // { id, name, modifiedTime } of the last layout loaded from Drive
 };
 
-const APP_VERSION = '2.1.1';
+const APP_VERSION = '2.1.2';
 
 /* Google Drive sync (Settings › Update from Google Drive).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -2467,10 +2467,16 @@ function applyRole() {
 }
 
 // "Rinkside Soundboard v2.0 · Layout: Hockey-Game-Day.rinkside.json (Oct 6, 2026)": tells you over the phone what a tablet has
+function versionText() {
+  const B = window.RINKSIDE_BUILD || {};
+  const copy = document.getElementById('default-show') ? 'downloaded single-file copy' : 'web app';
+  return `Version ${APP_VERSION}${B.built ? ` · built ${B.built}` : ''} · ${copy}`;
+}
 function renderAbout() {
   const L = settings.driveLayout;
   const layout = L ? `${L.name} (${new Date(L.modifiedTime).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })})` : show.name;
-  document.querySelectorAll('[data-about]').forEach(el => { el.textContent = `Rinkside Soundboard v${APP_VERSION} · Layout: ${layout}`; });
+  document.querySelectorAll('[data-version]').forEach(el => { el.textContent = versionText(); });
+  document.querySelectorAll('[data-about]').forEach(el => { el.textContent = `Rinkside Soundboard ${versionText()} · Layout: ${layout}`; });
 }
 
 async function builtInShow() {

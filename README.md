@@ -98,7 +98,12 @@ API key, no sign-in. Not used, because it can't control who has access.)
 
 ## Versions
 
-The version shows at the bottom of Settings and Help, with the layout's date.
+The version shows at the top of Help (the ? button), for example
+"Version 2.1.2 · built 2026-10-07 23:04 · web app", and again at the bottom of
+Settings and Help with the layout's date. `APP_VERSION` in `app.js` is the version
+number; `build.py` adds the build date and time and writes `version.js` (the
+single-file copy has it built in). Bump `APP_VERSION` and `VERSION` in `sw.js`
+for every release.
 v1.0 (before Drive sync) is kept on the `v1.0-stable` branch on GitHub, and as
 `dist/Rinkside-Soundboard-v1-stable.html`. To go back: on GitHub, Settings >
 Pages > set the branch to `v1.0-stable`.
