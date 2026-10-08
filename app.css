@@ -592,3 +592,14 @@ dialog { max-height: calc(100% - 32px - env(safe-area-inset-top, 0px) - env(safe
 .trow .tick { margin-left: auto; color: var(--live); }
 .trow .tick svg, .trow.add svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
 .trow.add { color: var(--live); font-size: 15px; }
+
+/* ---------- New version ready (2.2.1) ---------- */
+.update-bar {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 49;
+  width: min(520px, calc(100% - 32px)); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 14px;
+  background: var(--raised); color: var(--text); border: 1px solid var(--line-solid); border-radius: 14px;
+  padding: 12px 14px; box-shadow: 0 10px 30px rgba(0,0,0,.45);
+}
+.update-bar p { margin: 0; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.update-bar svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.update-btns { display: flex; gap: 8px; }

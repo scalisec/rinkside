@@ -247,7 +247,7 @@ layout file, rename it to `show.json`, put it in this folder, and run
 ## Hosting (installable app, free)
 
 1. Create a free GitHub account and a new repository (for example `rinkside`).
-2. Upload everything in this folder except `dist/` and `artifact.html`.
+2. Upload everything in this folder except `dist/`.
 3. Settings > Pages > Source: "Deploy from a branch", branch `main`, folder `/ (root)`.
 4. After a minute the app is at `https://<your-username>.github.io/rinkside/`.
 5. On each tablet, open that address in Chrome > menu > **Add to Home screen** > Install.

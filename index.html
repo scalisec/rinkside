@@ -239,12 +239,21 @@
       <p>Bluetooth always adds a short delay. Tap goal horns as soon as the goal is scored. A cable to the sound system has no delay.</p></details>
     <details><summary>Nothing plays.</summary>
       <p>Check the tablet volume and the Master slider. Make sure the Bluetooth speaker is connected before opening the app. Buttons with dashed outlines don't have their song file on this device yet.</p></details>
+    <details><summary>It says “A new version of Rinkside is ready.”</summary>
+      <p>The app downloaded an update by itself in the background. The message only appears when nothing is playing, so it never interrupts a song.</p>
+      <p><b>Update now</b> restarts the app on the new version. It takes a second or two. Your music, buttons and settings stay as they are.</p>
+      <p><b>Later</b> hides the message and you keep going as normal. The new version is used the next time you open the app.</p>
+      <p>The app always opens from the copy saved on your device, so it opens straight away even on weak rink wifi or with no internet.</p></details>
     <details><summary>I made a mess. Can I undo?</summary>
       <p>Open a layout file you saved earlier (Settings, then Open a layout file). Or use <b>Restore the built-in show</b> to go back to the show this copy came with. Your music stays on the device either way.</p></details>
     <p class="hint about" data-about></p>
   </div>
 </dialog>
 
+<div id="updateBar" class="update-bar" role="status" hidden>
+  <p><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>A new version of Rinkside is ready.</p>
+  <div class="update-btns"><button id="updateNow" class="btn primary" type="button">Update now</button><button id="updateLater" class="btn" type="button">Later</button></div>
+</div>
 <div id="toast" class="toast" role="status" hidden></div>
 
 <script src="version.js"></script>

@@ -45,7 +45,7 @@ const DEFAULTS = {
   driveLayout: null,       // { id, name, modifiedTime } of the last layout loaded from Drive
 };
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.2.1';
 
 /* Google Drive sync (Settings › Update from Google Drive).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -141,6 +141,9 @@ const hexLight = hex => {
   const r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55;
 };
+// Only plain #rrggbb-style colours and embedded images (data:image/…;base64) are allowed in a layout.
+const safeColor = (c, fallback) => (typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c.trim()) ? c.trim() : fallback);
+const safeImage = u => (typeof u === 'string' && u.length < 2e6 && /^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,[a-z0-9+/=\s]+$/i.test(u) ? u : null);
 const prettyName = filename => filename.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 let show = null;
@@ -160,19 +163,38 @@ const Show = {
       tabs: [{ id: uid(), name: 'In Game', color: '#3563d8', items: [] }],
     };
   },
-  // fills in anything missing so older or hand-edited files still load
+  /* Fills in anything missing so older or hand-edited files still load, and checks every value
+     a layout file can carry before it goes on screen: text stays text, colours must be colours,
+     logos must be embedded images, and unknown kinds of buttons are dropped. A layout file can come
+     from anywhere (a download, a zip, someone's email), so nothing in it is trusted. */
   normalise(s) {
     if (!s || s.format !== 'rinkside-show' || !Array.isArray(s.tabs)) throw new Error('not a show');
-    s.name = s.name || 'Game Day Show';
-    s.teams = Array.isArray(s.teams) && s.teams.length ? s.teams : Show.blank().teams;
-    s.teams.forEach(t => { t.id = t.id || uid(); t.name = t.name || 'Team'; t.full = t.full || t.name; t.color = t.color || '#3563d8'; t.shape = t.shape || 'round'; });
-    s.gameday = { situations: [], moments: [], endings: [], ...(s.gameday || {}) };
+    const str = (v, d, max = 200) => (typeof v === 'string' && v.trim() ? v : d).slice(0, max);
+    const num = (v, d = 0) => (Number.isFinite(+v) && +v >= 0 ? +v : d);
+    const id = v => (typeof v === 'string' || typeof v === 'number') && String(v).length <= 64 ? String(v) : uid();
+    s.name = str(s.name, 'Game Day Show');
+    s.teams = (Array.isArray(s.teams) && s.teams.length ? s.teams : Show.blank().teams).filter(t => t && typeof t === 'object');
+    if (!s.teams.length) s.teams = Show.blank().teams;
+    s.teams.forEach(t => {
+      t.id = id(t.id); t.name = str(t.name, 'Team', 40); t.full = str(t.full, t.name, 80);
+      t.color = safeColor(t.color, '#3563d8'); t.shape = t.shape === 'square' ? 'square' : 'round'; t.logo = safeImage(t.logo);
+      for (const f of ['goalHorn', 'pregame', 'game']) t[f] = t[f] == null ? null : id(t[f]);
+    });
+    const gd = s.gameday && typeof s.gameday === 'object' ? s.gameday : {};
+    const groups = list => (Array.isArray(list) ? list : []).filter(g => g && typeof g === 'object')
+      .map(g => ({ label: str(g.label, '', 60), prefix: str(g.prefix, '', 60), color: safeColor(g.color, '#8b95a1') }));
+    s.gameday = { situations: groups(gd.situations), moments: (Array.isArray(gd.moments) ? gd.moments : []).map(m => str(m, '', 60)), endings: groups(gd.endings) };
+    s.tabs = s.tabs.filter(t => t && typeof t === 'object');
     for (const tab of s.tabs) {
-      tab.id = tab.id || uid(); tab.name = tab.name || 'Tab'; tab.items = tab.items || [];
+      tab.id = id(tab.id); tab.name = str(tab.name, 'Tab', 60); tab.color = safeColor(tab.color, null);
+      tab.items = (Array.isArray(tab.items) ? tab.items : []).filter(it => it && ['sound', 'playlist', 'next'].includes(it.type));
       for (const it of tab.items) {
-        it.id = it.id || uid();
-        if (it.type === 'sound') { it.start = +it.start || 0; it.stop = +it.stop || 0; it.volume = it.volume ?? 1; it.length = +it.length || 0; }
-        if (it.type === 'playlist') it.songs = it.songs || [];
+        it.id = id(it.id); it.name = str(it.name, it.type === 'next' ? 'Next song' : 'Untitled', 200); it.color = safeColor(it.color, null);
+        if (it.type === 'sound') {
+          it.file = str(it.file, '', 400); it.start = num(it.start); it.stop = num(it.stop); it.length = num(it.length);
+          it.volume = Math.min(1.5, num(it.volume ?? 1, 1));
+        }
+        if (it.type === 'playlist') it.songs = (Array.isArray(it.songs) ? it.songs : []).map(id);
       }
     }
     return s;
@@ -303,7 +325,7 @@ const Teams = {
   playlist(team, kind) { return (team[kind] && idx.playlists.get(team[kind])) || null; },
   allGoalHorns() { return Show.uniqueSounds().filter(s => GOAL_HORN.include.test(s.name) && !GOAL_HORN.exclude.test(s.name)); },
   badge(team, cls = 'badge') {
-    if (team.logo) return `<span class="${cls} ${team.shape === 'square' ? 'square' : 'round'}"><img src="${team.logo}" alt="${esc(team.full)} logo"></span>`;
+    if (team.logo) return `<span class="${cls} ${team.shape === 'square' ? 'square' : 'round'}"><img src="${esc(safeImage(team.logo) || '')}" alt="${esc(team.full)} logo"></span>`;
     return `<span class="${cls} mono" style="--tc:${esc(team.color)}">${esc(team.name.slice(0, 1))}</span>`;
   },
   apply() {
@@ -1084,11 +1106,11 @@ const UI = {
     });
     (m.querySelector('.trow.on') || m.querySelector('.trow'))?.focus();
   },
-  toast(msg) {
+  toast(msg, ms = 3400) {
     const el = $('#toast');
     el.textContent = msg; el.hidden = false;
     clearTimeout(this._t);
-    this._t = setTimeout(() => { el.hidden = true; }, 3400);
+    this._t = setTimeout(() => { el.hidden = true; }, ms);
   },
 };
 
@@ -1338,7 +1360,7 @@ const Edit = {
     }
     if (f === 'plSearch') { if (!committed) $('#plPick').innerHTML = this.pickList(ref, el.value); return; }
     if (f === 'name' || f === 'full') { ref[f] = el.value; Show.save(); return; }
-    if (f === 'color') { ref.color = el.value; Show.save(); if (kind === 'team') Teams.apply(); return; }
+    if (f === 'color') { ref.color = safeColor(el.value, ref.color); Show.save(); if (kind === 'team') Teams.apply(); return; }
     if (f === 'start' || f === 'stop') { if (committed) { ref[f] = Math.max(0, Math.round((+el.value || 0) * 100) / 100); Show.save(); } return; }
     if (f === 'volume') { ref.volume = +el.value; $('#edVol').textContent = Math.round(ref.volume * 100) + '%'; tracks.filter(t => t.sound === ref).forEach(t => t.setUserVol(t.userVol)); Show.save(); return; }
     if (!committed) return;
@@ -1376,7 +1398,7 @@ const Edit = {
     const move = (arr, i, d) => { const j = i + d; if (i < 0 || j < 0 || j >= arr.length) return false; [arr[i], arr[j]] = [arr[j], arr[i]]; return true; };
 
     if (act === 'color') {
-      ref.color = b.dataset.v || null;
+      ref.color = safeColor(b.dataset.v, null);
       Show.save(); this.rerender();
       if (kind === 'team') { Teams.apply(); UI.renderHead(); }
     } else if (act === 'listen' || act === 'listenTop') {
@@ -1725,7 +1747,9 @@ const Auth = {
       include_granted_scopes: 'true', state };
     if (chooseAccount) q.prompt = 'select_account';
     for (const [k, v] of Object.entries(q)) u.searchParams.set(k, v);
-    location.assign(u.toString());
+    // save any just-made layout change before leaving the page for Google
+    clearTimeout(Show._t);
+    Store.put('kv', 'show', show).catch(() => {}).finally(() => location.assign(u.toString()));
   },
   // called at start-up: handles the "#access_token=…" (or "#error=…") Google sends back
   consume() {
@@ -2062,6 +2086,8 @@ const Drive = {
     } finally {
       this.busy = false;
       this.pub = null;
+      // the publish sign-in can change everything in the organizer's Drive: don't keep it around
+      if (Auth.canWrite()) Auth.forget();
     }
   },
 
@@ -2571,9 +2597,46 @@ async function boot() {
   }
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-    navigator.serviceWorker.register('sw.js').catch(() => { /* not available here (e.g. preview) */ });
+    // The app opens from its saved copy; a newer version downloads in the background (sw.js).
+    // Tell the volunteer once it's ready, but not on the very first install.
+    const hadCopy = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('message', e => {
+      if (hadCopy && e.data && e.data.type === 'rinkside-updated') Update.ready();
+    });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => { /* not available here (e.g. preview) */ });
   }
 }
+
+/* A new version has downloaded (sw.js). Offer it with a banner, but never while a song is
+   playing or music is downloading: wait until things are quiet. "Later" keeps the current
+   version until the app is next opened (it's already saved, so that happens by itself). */
+const Update = {
+  ready() {
+    if (this.shown) return;
+    clearTimeout(this._w);
+    const busy = tracks.some(t => t.state !== 'done') || document.body.classList.contains('syncing');
+    if (busy) { this._w = setTimeout(() => this.ready(), 2000); return; }
+    this.shown = true;
+    const el = $('#updateBar'); el.hidden = false;
+    // on phones and portrait tablets, sit just above Fade out all / Stop, never on top of them
+    const place = () => {
+      const a = $('.dock-actions')?.getBoundingClientRect();
+      const below = a && a.width > innerWidth * 0.6 && a.top > innerHeight / 2;   // dock along the bottom
+      const beside = a && !below && a.left > innerWidth / 2;                      // dock down the right side
+      el.style.bottom = below ? `${Math.round(innerHeight - a.top + 10)}px` : '';
+      el.style.left = beside ? `${Math.round(a.left / 2)}px` : '';
+      el.style.width = beside ? `min(520px, ${Math.round(a.left - 32)}px)` : '';
+    };
+    place(); addEventListener('resize', place);
+    $('#updateNow').onclick = async () => {
+      $('#updateNow').disabled = true; $('#updateNow').textContent = 'Updating…';
+      stopAll(); clearTimeout(Show._t);
+      await Store.put('kv', 'show', show).catch(() => {});
+      location.reload();
+    };
+    $('#updateLater').onclick = () => { el.hidden = true; };
+  },
+};
 
 // Start the audio engine on the very first touch anywhere, so the first
 // goal horn of the night doesn't pay the start-up delay.
