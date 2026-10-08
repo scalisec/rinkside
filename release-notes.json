@@ -1,0 +1,70 @@
+[
+  {
+    "version": "2.5.0",
+    "date": "2026-10-08",
+    "notes": [
+      { "type": "new", "text": "Release notes: see what's in an update before you tap Update now, and what changed right after updating. They're also in Help › What's new." }
+    ]
+  },
+  {
+    "version": "2.4.0",
+    "date": "2026-10-08",
+    "notes": [
+      { "type": "improved", "text": "The goal horn and whistle songs are kept ready, so the first tap of the night starts right away." },
+      { "type": "improved", "text": "Simpler Settings: show packs, Restore the built-in show and Start an empty show are now under Advanced." },
+      { "type": "improved", "text": "The top of Settings is now called Get Most Recent Updates." },
+      { "type": "improved", "text": "Security improvements." }
+    ]
+  },
+  {
+    "version": "2.3.0",
+    "date": "2026-10-08",
+    "notes": [
+      { "type": "new", "text": "Clean up storage (Settings › Music on this device) removes extra copies of songs. It shows exactly what would be removed first." },
+      { "type": "new", "text": "Adding songs that are already on the device asks whether to replace or keep them, instead of saving a second copy." }
+    ]
+  },
+  {
+    "version": "2.2.1",
+    "date": "2026-10-08",
+    "notes": [
+      { "type": "improved", "text": "The app opens straight away, even on weak rink wifi or with no internet." },
+      { "type": "new", "text": "A message when a new version is ready, with Update now or Later." },
+      { "type": "fixed", "text": "A rink wifi sign-in page can no longer break the app's offline copy." },
+      { "type": "improved", "text": "Security improvements." }
+    ]
+  },
+  {
+    "version": "2.2.0",
+    "date": "2026-10-08",
+    "notes": [
+      { "type": "new", "text": "Team dropdown at the top: pick from any number of teams." },
+      { "type": "improved", "text": "The progress bar now sits right under Check for updates." },
+      { "type": "fixed", "text": "Buttons no longer hide behind the iPhone camera cut-out." },
+      { "type": "improved", "text": "New gear icon for Settings." }
+    ]
+  },
+  {
+    "version": "2.1.2",
+    "date": "2026-10-07",
+    "notes": [
+      { "type": "new", "text": "The version number is shown at the top of Help." }
+    ]
+  },
+  {
+    "version": "2.1.1",
+    "date": "2026-10-07",
+    "notes": [
+      { "type": "fixed", "text": "Everyone can use Edit again. Changes stay on your own device." },
+      { "type": "new", "text": "A warning before a Drive update replaces changes you made on your device." }
+    ]
+  },
+  {
+    "version": "2.1.0",
+    "date": "2026-10-07",
+    "notes": [
+      { "type": "new", "text": "Download all music and Check for updates straight from the team's Google Drive folder, after signing in with Google." },
+      { "type": "new", "text": "Organizer: Publish to Drive sends layout changes and new songs to everyone." }
+    ]
+  }
+]

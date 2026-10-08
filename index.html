@@ -192,6 +192,7 @@
   </div>
   <div class="dlg-body">
     <p class="version-line" data-version></p>
+    <details id="whatsNew" class="whats-new"><summary>What's new in Rinkside</summary><div id="notesList"></div></details>
     <h3>Running a game (volunteers)</h3>
     <ul class="steps">
       <li><b>Pick the team</b>: tap the team button at the top left and choose from the list. The big GOAL! button, Pregame and Game music follow the team.</li>
@@ -262,9 +263,10 @@
     <details><summary>It asks “Already on this device”.</summary>
       <p>Some songs you're adding are already saved. <b>Keep the ones on this device</b> skips them; <b>Replace them</b> swaps in the files you picked. Either way the app doesn't save a second copy. <b>Cancel</b> adds nothing.</p></details>
     <details><summary>It says “A new version of Rinkside is ready.”</summary>
-      <p>The app downloaded an update by itself in the background. The message only appears when nothing is playing, so it never interrupts a song.</p>
+      <p>The app downloaded an update by itself in the background. The message only appears when nothing is playing, so it never interrupts a song. Tap <b>See what's new</b> to see what's in it before you decide.</p>
       <p><b>Update now</b> restarts the app on the new version. It takes a second or two. Your music, buttons and settings stay as they are.</p>
       <p><b>Later</b> hides the message and you keep going as normal. The new version is used the next time you open the app.</p>
+      <p>Right after an update you'll see <b>Rinkside updated to …</b> once, with <b>See what's new</b>. Every version's changes are listed at the top of this Help, under <b>What's new in Rinkside</b>.</p>
       <p>The app always opens from the copy saved on your device, so it opens straight away even on weak rink wifi or with no internet.</p></details>
     <details><summary>I made a mess. Can I undo?</summary>
       <p>To go back to the team's layout, open Settings and tap <b>Check for updates</b> (it offers the layout from Drive if yours is different). You can also open a layout file you saved earlier (Settings › Share and back up › <b>Open a layout file</b>), or use <b>Restore the built-in show</b> under <b>Advanced</b>. Your music stays on the device either way.</p></details>
@@ -283,8 +285,13 @@
 </dialog>
 
 <div id="updateBar" class="update-bar" role="status" hidden>
-  <p><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>A new version of Rinkside is ready.</p>
+  <p><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg><span>A new version of Rinkside is ready<span id="updateVer"></span>.</span></p>
+  <details id="updateNotes" class="rn-wrap" hidden><summary>See what's new</summary><div id="updateNotesList"></div></details>
   <div class="update-btns"><button id="updateNow" class="btn primary" type="button">Update now</button><button id="updateLater" class="btn" type="button">Later</button></div>
+</div>
+<div id="newsBar" class="update-bar" role="status" hidden>
+  <p><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>Rinkside updated to <span id="newsVer"></span>.</span></p>
+  <div class="update-btns"><button id="newsSee" class="btn primary" type="button">See what's new</button><button id="newsOk" class="btn" type="button">OK</button></div>
 </div>
 <div id="toast" class="toast" role="status" hidden></div>
 

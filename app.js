@@ -44,7 +44,7 @@ const DEFAULTS = {
   driveLayout: null,       // { id, name, modifiedTime } of the last layout loaded from Drive
 };
 
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.5.0';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -130,6 +130,8 @@ const Prefs = {
   savePlayed() { try { localStorage.setItem('rinkside.played', JSON.stringify([...played])); } catch (e) {} },
 };
 
+// set up before this page load? (checked before anything is saved; used for the one-time "what's new")
+const HAD_SETTINGS = (() => { try { return !!localStorage.getItem('rinkside.settings'); } catch (e) { return false; } })();
 let settings = Prefs.load();
 let played = Prefs.loadPlayed(); // song file keys played this game
 
@@ -1020,7 +1022,7 @@ const UI = {
       if (act === 'close') { activePL?.track?.fadeOut(); activePL = null; this.renderDock(); this.refreshPads(); }
     });
     $('#settingsBtn').addEventListener('click', () => Settings.open());
-    $('#helpBtn').addEventListener('click', () => { renderAbout(); $('#help').showModal(); });
+    $('#helpBtn').addEventListener('click', () => { renderAbout(); Notes.renderHelp(); $('#help').showModal(); });
     $('#editBtn').addEventListener('click', () => Edit.toggle());
     // Full screen hides Chrome's address bar. Not needed (or offered) when installed as an app.
     const fb = $('#fullBtn');
@@ -2836,6 +2838,8 @@ async function boot() {
     }, 60);
   }
 
+  News.check(!!signin);
+
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     // The app opens from its saved copy; a newer version downloads in the background (sw.js).
     // Tell the volunteer once it's ready, but not on the very first install.
@@ -2847,27 +2851,64 @@ async function boot() {
   }
 }
 
+/* Release notes (release-notes.json, built into version.js as RINKSIDE_NOTES): newest first. */
+const cmpVer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
+const Notes = {
+  TAG: { new: 'New', improved: 'Better', fixed: 'Fixed' },
+  date(d) { try { return new Date(d + 'T12:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }); } catch (e) { return d; } },
+  // versions after `from` up to and including `to`
+  between(list, from, to) { return (list || []).filter(n => (!from || cmpVer(n.version, from) > 0) && (!to || cmpVer(n.version, to) <= 0)); },
+  items(n) { return `<ul class="rn">${n.notes.map(i => `<li><span class="rn-tag ${esc(i.type)}">${esc(this.TAG[i.type] || i.type)}</span>${esc(i.text)}</li>`).join('')}</ul>`; },
+  // one version: heading + list; several: a heading per version
+  html(list, headings = list.length > 1) {
+    return list.map(n => (headings ? `<p class="rn-head">Version ${esc(n.version)} · ${esc(this.date(n.date))}</p>` : '') + this.items(n)).join('');
+  },
+  // Help › What's new: every version, newest open
+  renderHelp() {
+    const list = window.RINKSIDE_NOTES || [];
+    $('#whatsNew').hidden = !list.length;
+    $('#notesList').innerHTML = list.map((n, i) => `<details class="rn-ver"${i === 0 ? ' open' : ''}><summary>Version ${esc(n.version)} · ${esc(this.date(n.date))}${n.version === APP_VERSION ? ' <small>(this version)</small>' : ''}</summary>${this.items(n)}</details>`).join('');
+  },
+  openHelp() {
+    renderAbout(); this.renderHelp();
+    $('#help').showModal(); $('#whatsNew').open = true;
+    $('#whatsNew').scrollIntoView({ block: 'start' });
+  },
+};
+
+// Keep a bottom bar clear of Fade out all / Stop: on phones and portrait tablets it sits just
+// above them; with the dock down the right side, it centres on the rest of the screen.
+function placeBar(el) {
+  const place = () => {
+    const a = $('.dock-actions')?.getBoundingClientRect();
+    const below = a && a.width > innerWidth * 0.6 && a.top > innerHeight / 2;
+    const beside = a && !below && a.left > innerWidth / 2;
+    el.style.bottom = below ? `${Math.round(innerHeight - a.top + 10)}px` : '';
+    el.style.left = beside ? `${Math.round(a.left / 2)}px` : '';
+    el.style.width = beside ? `min(520px, ${Math.round(a.left - 32)}px)` : '';
+  };
+  place(); addEventListener('resize', place);
+}
+const quiet = () => !tracks.some(t => t.state !== 'done') && !document.body.classList.contains('syncing');
+
 /* A new version has downloaded (sw.js). Offer it with a banner, but never while a song is
-   playing or music is downloading: wait until things are quiet. "Later" keeps the current
-   version until the app is next opened (it's already saved, so that happens by itself). */
+   playing or music is downloading: wait until things are quiet. The banner shows what's in
+   the new version (its release notes, read from the new offline copy). "Later" keeps the
+   current version until the app is next opened (it's already saved, so that happens by itself). */
 const Update = {
-  ready() {
+  async ready() {
     if (this.shown) return;
     clearTimeout(this._w);
-    const busy = tracks.some(t => t.state !== 'done') || document.body.classList.contains('syncing');
-    if (busy) { this._w = setTimeout(() => this.ready(), 2000); return; }
+    if (!quiet()) { this._w = setTimeout(() => this.ready(), 2000); return; }
     this.shown = true;
+    let fresh = [];
+    try { fresh = Notes.between(await (await fetch('release-notes.json', { cache: 'no-cache' })).json(), APP_VERSION); } catch (e) {}
+    $('#updateVer').textContent = fresh.length ? ` (version ${fresh[0].version})` : '';
+    $('#updateNotes').hidden = !fresh.length;
+    $('#updateNotesList').innerHTML = Notes.html(fresh);
     const el = $('#updateBar'); el.hidden = false;
-    // on phones and portrait tablets, sit just above Fade out all / Stop, never on top of them
-    const place = () => {
-      const a = $('.dock-actions')?.getBoundingClientRect();
-      const below = a && a.width > innerWidth * 0.6 && a.top > innerHeight / 2;   // dock along the bottom
-      const beside = a && !below && a.left > innerWidth / 2;                      // dock down the right side
-      el.style.bottom = below ? `${Math.round(innerHeight - a.top + 10)}px` : '';
-      el.style.left = beside ? `${Math.round(a.left / 2)}px` : '';
-      el.style.width = beside ? `min(520px, ${Math.round(a.left - 32)}px)` : '';
-    };
-    place(); addEventListener('resize', place);
+    placeBar(el);
     $('#updateNow').onclick = async () => {
       $('#updateNow').disabled = true; $('#updateNow').textContent = 'Updating…';
       stopAll(); clearTimeout(Show._t);
@@ -2876,6 +2917,31 @@ const Update = {
     };
     $('#updateLater').onclick = () => { el.hidden = true; };
   },
+};
+
+/* Once, right after an update: "Rinkside updated to 2.5.0 · See what's new". Not on a brand
+   new install, and not while coming back from Google sign-in (it shows next time instead). */
+const News = {
+  KEY: 'rinkside.seenVersion',
+  check(signingIn) {
+    let seen = null;
+    try { seen = localStorage.getItem(this.KEY); } catch (e) {}
+    // set up before release notes existed (2.4.0 or earlier): treat as 2.4.0
+    if (!seen && HAD_SETTINGS) seen = '2.4.0';
+    if (!seen || cmpVer(APP_VERSION, seen) <= 0) { this.mark(); return; }
+    if (signingIn) return;
+    const fresh = Notes.between(window.RINKSIDE_NOTES, seen, APP_VERSION);
+    if (!fresh.length) { this.mark(); return; }
+    const show = () => {
+      if (!quiet() || document.querySelector('dialog[open]')) { setTimeout(show, 2000); return; }
+      this.mark();
+      const el = $('#newsBar'); $('#newsVer').textContent = APP_VERSION; el.hidden = false; placeBar(el);
+      $('#newsSee').onclick = () => { el.hidden = true; Notes.openHelp(); };
+      $('#newsOk').onclick = () => { el.hidden = true; };
+    };
+    setTimeout(show, 1200);
+  },
+  mark() { try { localStorage.setItem(this.KEY, APP_VERSION); } catch (e) {} },
 };
 
 // Start the audio engine on the very first touch anywhere, so the first

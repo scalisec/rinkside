@@ -103,6 +103,13 @@ Settings and Help with the layout's date. `APP_VERSION` in `app.js` is the versi
 number; `build.py` adds the build date and time and writes `version.js` (the
 single-file copy has it built in). Bump `APP_VERSION` and `VERSION` in `sw.js`
 for every release.
+
+**Release notes.** Every release adds an entry at the top of `release-notes.json`
+(version, date, and plain-language items tagged `new`, `improved` or `fixed`;
+behind-the-scenes changes as one "Security and reliability improvements" line).
+`build.py` refuses to build without an entry for `APP_VERSION`. The notes show in
+the "new version ready" banner (See what's new), once after updating, and in
+Help › What's new in Rinkside.
 v1.0 (before Drive sync) is kept on the `v1.0-stable` branch on GitHub, and as
 `dist/Rinkside-Soundboard-v1-stable.html`. To go back: on GitHub, Settings >
 Pages > set the branch to `v1.0-stable`.

@@ -617,3 +617,23 @@ dialog.ask { width: min(480px, calc(100% - 32px)); }
 .advanced > summary { cursor: pointer; padding: 12px 0; font-weight: 600; color: var(--muted); }
 .advanced[open] > summary { color: var(--text); }
 .advanced .share-card { margin-bottom: 12px; }
+
+/* ---------- Release notes (2.5.0) ---------- */
+.update-bar { flex-direction: column; align-items: stretch; }
+.update-bar > p { flex-wrap: nowrap; }
+.update-bar .update-btns { justify-content: flex-start; }
+.rn-wrap > summary { cursor: pointer; color: var(--muted); font-size: 14px; padding: 2px 0; }
+.rn-wrap[open] > summary { color: var(--text); }
+#updateNotesList { max-height: min(40vh, 320px); overflow-y: auto; margin-top: 6px; }
+ul.rn { list-style: none; margin: 4px 0 8px; padding: 0; display: grid; gap: 6px; font-size: 14px; line-height: 1.4; }
+ul.rn li { display: flex; gap: 8px; align-items: baseline; }
+.rn-tag { flex: none; min-width: 52px; text-align: center; font: 700 11px/1.6 var(--body); letter-spacing: .06em; text-transform: uppercase; border-radius: 6px; padding: 0 6px; }
+.rn-tag.new { background: #1f6f43; color: #e9fff2; }
+.rn-tag.improved { background: #22507a; color: #eaf4ff; }
+.rn-tag.fixed { background: #7a4b12; color: #fff3e3; }
+.rn-head { margin: 8px 0 2px; font-weight: 700; font-size: 13px; color: var(--muted); }
+.whats-new { border: 1px solid var(--line-solid); border-radius: var(--radius); padding: 0 12px; margin: 4px 0 8px; }
+.whats-new > summary { cursor: pointer; padding: 12px 0; font-weight: 700; }
+.rn-ver { margin: 0 0 8px; }
+.rn-ver > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.rn-ver small { color: var(--muted); font-weight: 400; }
