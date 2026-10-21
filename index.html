@@ -69,8 +69,8 @@
   </div>
   <div class="dlg-body">
     <h3 id="driveSection">Get Most Recent Updates</h3>
-    <p class="hint" id="driveIntroOnline" hidden>Gets the newest layout and any new or changed songs from the team's Google Drive folder (<b>Hockey Music App</b>). You'll sign in with your Google account: only people the organizer has shared the folder with can download. The first time downloads every song (about 2&nbsp;GB), so use good wifi and keep the app open until it finishes.</p>
-    <p class="hint" id="driveIntroFiles">Download the music and layout from the team's Google Drive folder (<b>Hockey Music App</b>), then open the downloads here. The app adds the newest layout and only the songs that are new or changed, so updates are quick. Nothing needs unzipping.</p>
+    <p class="hint" id="driveIntroOnline">Gets the newest layout and any new or changed songs from the team's Google Drive folder (<b>Hockey Music App</b>). You'll sign in with your Google account: only people the organizer has shared the folder with can download. The first time downloads every song (about 2&nbsp;GB), so use good wifi and keep the app open until it finishes.</p>
+    <p class="hint warn-text" id="driveNotReady" hidden>Getting music needs Google sign-in, which only works when Rinkside is opened from its Home Screen icon or its web address (scalisec.github.io/rinkside).</p>
     <div class="row">
       <button id="driveCheck" class="btn primary" hidden>Check for updates</button>
       <button id="driveSwitch" class="btn" hidden>Switch Google account</button>
@@ -91,88 +91,73 @@
       <h4>Organizer: publish to Drive</h4>
       <p class="hint">Sends this device's layout, and any songs you've added, to the team's Drive folder. New songs go into the matching category folder under Hockey Songs. Nothing in Drive is deleted, and Drive keeps earlier layouts in its version history. Volunteers get the changes when they tap Check for updates.</p>
       <div class="row"><button id="drivePublish" class="btn">Publish to Drive</button></div>
+      <details id="redoBox" class="clean-list" hidden><summary id="redoSum">Changes you still need to make again</summary>
+        <p class="hint">You got the latest layout from Drive before publishing, so these changes from this device were replaced. Make them again in Edit, then publish.</p>
+        <ul id="redoList"></ul>
+        <div class="row"><button id="redoClear" class="btn">Done, clear this list</button></div>
+      </details>
       <div id="pubPlan" class="confirm" hidden>
         <p id="pubPlanText"></p>
         <div class="row"><button id="pubGo" class="btn primary">Publish now</button><button id="pubNo" class="btn">Cancel</button></div>
       </div>
     </div>
-    <p class="hint" id="driveFilesLead" hidden>Or, if you downloaded the files from Drive yourself:</p>
-    <div class="row">
-      <label class="btn primary file-btn" id="driveFilesBtn">Open Drive download<input id="driveFiles" type="file" multiple accept=".zip,application/zip,application/x-zip-compressed,.json,application/json,audio/*,.mp3,.m4a,.wav"></label>
-    </div>
-    <details class="howto"><summary>How to download the folder from Google Drive</summary>
-      <ol class="steps">
-        <li><b>On a computer:</b> go to drive.google.com and open <b>Shared with me</b> › <b>Hockey Music App</b>.<br>
-          <b>On a tablet or phone:</b> open drive.google.com in Chrome (or Safari on iPhone/iPad) and switch to the desktop site: Chrome menu ⋮ › <b>Desktop site</b>, or in Safari tap <b>aA</b> › <b>Request Desktop Website</b>. The Google Drive app can't download folders.</li>
-        <li>Tap ⋮ next to the <b>Hockey Songs</b> folder (or right-click it) and choose <b>Download</b>. Google zips it up: it arrives as one or more zip files (…-001.zip, …-002.zip). Download all of them.</li>
-        <li>Tap ⋮ next to <b>Hockey-Game-Day.rinkside.json</b> (the layout) and choose <b>Download</b>. You don't need the .rinkpack or .html files.</li>
-        <li>When the downloads finish, tap <b>Open Drive download</b> here and pick all of the files together (they're in Downloads, or Files › Downloads on iPhone).</li>
-        <li>Check what the app found, then tap <b>Add to this device</b>. Afterwards you can delete the downloaded files to free up space.</li>
-      </ol>
-      <p class="hint">Next time, download just the layout file and any song folders that changed. Downloading Hockey Songs again is fine too: songs already on this device are skipped.</p>
-    </details>
     <p id="driveLast" class="hint"></p>
-    <details id="driveConn" hidden><summary>Drive connection (organizer)</summary>
-      <label class="field">Google Drive folder link<input id="driveFolder" type="url" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the team folder"></label>
-      <label class="field">Google sign-in client ID<input id="driveClient" type="text" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the built-in one"></label>
-      <p class="hint">The folder holds the layout file (.rinkside.json) and the music folders. Share it with each volunteer's Google account (Viewer). These settings only change this device.</p>
-    </details>
 
-    <h3>Show</h3>
-    <label class="field">Show name (used for file names when you share)<input id="showName" type="text" autocomplete="off"></label>
+    <h3>Teams</h3>
     <div id="teamList" class="team-list"></div>
 
     <h3>Music on this device</h3>
     <div id="libStat" class="stat">0</div>
-    <p class="hint">Pick the folder that holds your category folders (In Game Action, Top Hits A, …), or pick files one folder at a time. Songs are saved on this device, so you only do this once and game day works without wifi.</p>
-    <div class="row">
-      <label id="folderBtn" class="btn file-btn">Add music folder<input id="musicFolder" type="file" webkitdirectory multiple></label>
-      <label class="btn file-btn">Add music files<input id="musicFiles" type="file" multiple accept="audio/*,.mp3,.m4a,.wav"></label>
-      <button id="clearMusic" class="btn">Remove stored music</button>
-    </div>
-    <p id="importProgress" class="progress" aria-live="polite"></p>
+    <p class="hint">Songs are saved on this device, so game day works without wifi. To add a new song to a button, use <b>Edit</b> › <b>Add songs</b>.</p>
     <div class="row"><button id="cleanCheck" class="btn">Clean up storage</button></div>
-    <p class="hint">Finds extra copies of songs and songs no button uses, and tells you exactly what would be removed before anything is deleted.</p>
+    <p class="hint">Finds extra copies of songs and songs no button uses, and tells you exactly what would be removed before anything is deleted. It can also remove all the music from this device.</p>
     <div id="cleanPlan" class="confirm" hidden>
       <p id="cleanIntro"></p>
-      <label class="setting" id="cleanDupRow"><span><b id="cleanDupLbl"></b><br><small>The same song saved more than once (for example from Add music folder and from Drive). One copy of each is kept (the one from the team's Drive folder when there is one), so every button still plays.</small></span><input id="cleanDupOpt" type="checkbox" checked></label>
+      <label class="setting" id="cleanDupRow"><span><b id="cleanDupLbl"></b><br><small>The same song saved more than once (for example added by hand and downloaded from Drive). One copy of each is kept (the one from the team's Drive folder when there is one), so every button still plays.</small></span><input id="cleanDupOpt" type="checkbox" checked></label>
       <details id="cleanDupList" class="clean-list"><summary>See the copies that would be removed</summary><ul></ul></details>
       <label class="setting" id="cleanUnusedRow"><span><b id="cleanUnusedLbl"></b><br><small id="cleanUnusedWhy"></small></span><input id="cleanUnusedOpt" type="checkbox"></label>
       <details id="cleanUnusedList" class="clean-list"><summary>See the songs that would be removed</summary><ul></ul></details>
+      <label class="setting" id="cleanAllRow"><span><b id="cleanAllLbl"></b><br><small>Every song on this device. The buttons stay, but nothing plays until you download the music again with <b>Check for updates</b> (about 2&nbsp;GB, on wifi).</small></span><input id="cleanAllOpt" type="checkbox"></label>
       <p id="cleanKept"></p>
       <p id="cleanAfter"></p>
       <div class="row"><button id="cleanGo" class="btn primary">Remove</button><button id="cleanNo" class="btn">Cancel</button></div>
     </div>
     <p id="cleanProgress" class="progress" aria-live="polite"></p>
-    <p id="storageWarn" class="hint warn-text" hidden>This copy was opened in a way that can't save music on the device, so you'll need to add your music each time. Opening it from Chrome's Downloads, or from the web address, keeps your music.</p>
+    <p id="storageWarn" class="hint warn-text" hidden>This copy was opened in a way that can't save music on the device, so you'll need to add your music each time. Open Rinkside from its Home Screen icon (not a private browsing window) to keep your music.</p>
     <details id="missingWrap"><summary><span id="missingCount">0</span> songs still missing</summary><ul id="missingList" class="missing-list"></ul></details>
     <p id="storageInfo" class="hint"></p>
 
-    <h3>Share and back up</h3>
-    <div class="share-card">
-      <b>Layout file</b>
-      <p class="hint">Tabs, buttons, cut points, playlists, groups, teams and logos. Small enough to email. The other person gets the music from the team's Drive folder.</p>
-      <div class="row"><button id="saveLayout" class="btn">Save layout file…</button><label class="btn file-btn">Open a layout file<input id="openShow" type="file"></label></div>
-    </div>
-    <p class="hint">On a computer (Chrome or Edge), you'll be asked where to save. Phones and tablets save to the Downloads folder.</p>
-    <details id="advanced" class="advanced">
-      <summary>Advanced: show packs and starting over</summary>
+    <h3>Start over</h3>
+    <p class="hint">Made a mess with Edit? This puts back the team's layout from Google Drive: the tabs, buttons and playlists everyone else has. Changes you made on this device are replaced. Your music stays.</p>
+    <div class="row"><button id="resetShow" class="btn">Reset to the Drive layout</button></div>
+    <p id="resetProgress" class="progress" aria-live="polite"></p>
+
+    <details id="advanced" class="advanced" hidden>
+      <summary>Advanced (organizer)</summary>
+      <p class="hint">Only people who can edit the team's Drive folder see this.</p>
+      <div class="share-card">
+        <b>Layout file</b>
+        <p class="hint">Tabs, buttons, cut points, playlists, groups, teams and logos in one small file: a backup, or a way to try a layout without publishing it. Drive also keeps earlier layouts in its version history.</p>
+        <div class="row"><button id="saveLayout" class="btn">Save layout file…</button><label class="btn file-btn">Open a layout file<input id="openShow" type="file"></label></div>
+      </div>
       <div class="share-card">
         <b>Full show pack</b>
         <p class="hint">Everything, including the music on this device, in one large file (often 1–4 GB). Only needed to copy the app to another device with no internet. Normally use <strong>Check for updates</strong> instead.</p>
         <div class="row"><button id="savePack" class="btn">Save show pack…</button><label class="btn file-btn">Open a show pack<input id="openPack" type="file"></label></div>
       </div>
-      <div class="share-card">
-        <b>Start over</b>
-        <p class="hint">Replaces the tabs, buttons and playlists on this device (you'll be asked to tap twice). Your music stays. To get the team's layout back, tap <strong>Check for updates</strong>.</p>
-        <div class="row"><button id="resetShow" class="btn">Restore the built-in show</button><button id="blankShow" class="btn">Start an empty show</button></div>
+      <p class="hint">On a computer (Chrome or Edge), you'll be asked where to save. Phones and tablets save to the Downloads folder.</p>
+      <div id="confirmOpen" class="confirm" hidden>
+        <p id="confirmText"></p>
+        <div class="row"><button id="confirmYes" class="btn primary">Open it</button><button id="confirmNo" class="btn">Cancel</button></div>
+      </div>
+      <p id="shareProgress" class="progress" aria-live="polite"></p>
+      <div class="share-card" id="driveConn">
+        <b>Drive connection</b>
+        <label class="field">Google Drive folder link<input id="driveFolder" type="url" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the team folder"></label>
+        <label class="field">Google sign-in client ID<input id="driveClient" type="text" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the built-in one"></label>
+        <p class="hint">The folder holds the layout file (.rinkside.json) and the music folders. Share it with each volunteer's Google account (Viewer). Leave both blank unless you're testing; they only change this device.</p>
       </div>
     </details>
-    <div id="confirmOpen" class="confirm" hidden>
-      <p id="confirmText"></p>
-      <div class="row"><button id="confirmYes" class="btn primary">Open it</button><button id="confirmNo" class="btn">Cancel</button></div>
-    </div>
-    <p id="shareProgress" class="progress" aria-live="polite"></p>
 
     <h3>Playback</h3>
     <div class="setting"><span>Fade-out length</span><span id="fadeLenOut" class="num"></span>
@@ -208,12 +193,7 @@
     <details><summary>How do I get the music, and the newest songs and layout?</summary>
       <p>On good wifi, unlock, open <b>Settings</b> and tap <b>Download all music</b> (the first time) or <b>Check for updates</b> (after that). Sign in with the Google account the organizer shared the music with. The app shows what's new; tap <b>Download now</b>. Only new or changed songs are downloaded, so updates are quick.</p>
       <p>If you changed the show on this device with Edit, a layout update from Drive replaces those changes. The app tells you first, and you can untick <b>Update the layout</b> to keep yours.</p>
-      <p>The first time, Google warns that it hasn't verified the app: tap <b>Continue</b>. If a big download stops (the screen locked, the wifi dropped, or the sign-in ran out after an hour), tap <b>Check for updates</b> again: it carries on where it stopped.</p>
-      <p>Using the downloaded single-file copy instead of the web address? Download the files from Google Drive yourself and use <b>Open Drive download</b>.</p></details>
-    <details><summary>How do I publish an update for everyone? (organizer)</summary>
-      <p>Anyone can change the show on their own device with <b>Edit</b>. Those changes stay on that device only. Publishing them for everyone is for the organizer: the person with <b>Editor</b> access to the Hockey Music App folder in Google Drive. Volunteers have Viewer access, so they don't see Publish.</p>
-      <p>Tap <b>Check for updates</b> once so the app knows you're the organizer. Then make your changes in <b>Edit</b> (add songs, playlists, cut points). Open <b>Settings</b> and tap <b>Publish to Drive</b>. The first time, Google asks for permission to change files in Drive. The app shows what it will send (the layout and any new songs), then uploads it. New songs go into the matching category folder under Hockey Songs. Nothing in Drive is deleted, and Drive keeps earlier layouts in its version history (right-click the layout file › Manage versions).</p>
-      <p>Volunteers get the changes the next time they tap <b>Check for updates</b>.</p></details>
+      <p>The first time, Google warns that it hasn't verified the app: tap <b>Continue</b>. If a big download stops (the screen locked, the wifi dropped, or the sign-in ran out after an hour), tap <b>Check for updates</b> again: it carries on where it stopped.</p></details>
     <details><summary>How do I add a new song?</summary>
       <p>Unlock, tap <b>Edit</b>, open the tab you want, and tap <b>Add songs</b>. Pick one or more MP3 files. Each file becomes a button named after the file. Tap the new button to rename it, set its colour and set its start point. Tap <b>Done</b> at the top when you're finished.</p></details>
     <details><summary>How do I make a song start at the good part?</summary>
@@ -231,24 +211,17 @@
       <p>In Edit, tap <b>New tab</b> at the end of the tab row. To change a tab, open it and tap <b>Tab settings</b>: rename it, pick a colour, move it left or right, add a whole folder of songs, or delete it.</p></details>
     <details><summary>How do I move or copy a button to another tab?</summary>
       <p>In Edit, tap the button. Change <b>Tab</b> to move it, or use <b>Also put a copy on</b> to show it in two places. Use <b>Move earlier</b> and <b>Move later</b> to change its position.</p></details>
-    <details><summary>How do I share this with another volunteer or tablet?</summary>
-      <p>Everyone gets the music and the buttons from the team's Google Drive folder: <b>Settings › Download all music</b> (later, <b>Check for updates</b>). The organizer gives a new volunteer access by sharing the <b>Hockey Music App</b> folder with their Google account.</p>
-      <p><b>Layout file</b> (Settings › Share and back up): small, easy to email. The other person taps <b>Open a layout file</b>; their music still comes from Drive. Songs match by folder and file name.</p>
-      <p><b>Show pack</b> (Settings › Share and back up › <b>Advanced</b>): includes all the music, so it is large (1–4 GB). Only needed to copy the app to a device with no internet. On the other device, open <b>Advanced</b> and tap <b>Open a show pack</b>.</p>
-      <p>Save a layout file after big changes. It is also your backup.</p></details>
-    <details><summary>Can I edit on my computer instead of the tablet?</summary>
-      <p>Yes. Open the app in Chrome on your computer, make your changes, then save a layout file and open it on the tablet. If you're the organizer, you can use <b>Publish to Drive</b> instead so everyone gets them.</p></details>
+    <details><summary>How does a new volunteer or tablet get set up?</summary>
+      <p>Everyone gets the music and the buttons from the team's Google Drive folder. The organizer shares the <b>Hockey Music App</b> folder with the volunteer's Google account. Then, on the new phone or tablet, open the app from its web address, add it to the Home Screen, and tap <b>Settings › Download all music</b> on wifi.</p></details>
     <details><summary>Some buttons have dashed outlines and say “File not loaded”.</summary>
-      <p>That song file isn't on this device. Open Settings and add your music folder again, or open the button in Edit and choose the file. Settings lists every missing song.</p></details>
+      <p>That song file isn't on this device. Open Settings and tap <b>Check for updates</b> on wifi to download it. Settings lists every missing song under <b>Music on this device</b>. If it's a song you added yourself, open the button in Edit and choose the file again.</p></details>
     <details><summary>How do I put it on the home screen with the hockey icon?</summary>
-      <p>Open the app in Chrome, tap Chrome's menu (⋮), then <b>Add to Home screen</b> (or <b>Install app</b>). The crossed-sticks icon appears on the home screen.</p>
-      <p>If you opened the single file, the icon has a small Chrome badge and the app opens with Chrome's address bar. Tap the <b>full screen</b> button (four corners) at the top to hide the address bar. Swipe from the edge or press back to leave full screen.</p>
-      <p>If you opened it from its web address, the app installs like a real app: no Chrome badge and no address bar.</p></details>
+      <p><b>Android:</b> open the app's web address in Chrome, tap Chrome's menu (⋮), then <b>Add to Home screen</b> (or <b>Install app</b>). The crossed-sticks icon appears on the home screen, and the app opens without Chrome's address bar.</p>
+      <p><b>iPhone / iPad:</b> open the web address in Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>.</p></details>
     <details><summary>Can I use it on an iPhone or iPad?</summary>
-      <p>Yes, from its web address in <b>Safari</b> (the single downloaded file can't run on an iPhone or iPad). Open the address, tap <b>Share</b>, then <b>Add to Home Screen</b>, and always open it from that icon: Safari can clear a website's saved music if it isn't on the Home Screen.</p>
-      <p>To get the music, open <b>Settings › Download all music</b> and sign in with Google. You can also use <b>Open Drive download</b>, <b>Add music folder</b> (iOS 18.4 or newer) or <b>Add music files</b>, or a show pack (Settings › Share and back up › <b>Advanced</b>). If there's no sound while the ring/silent switch is on silent, update iOS.</p>
-      <p>The first download is about 2&nbsp;GB. Make sure there's room, and keep the screen on (Settings › Display &amp; Brightness › Auto-Lock) until it finishes.</p>
-      <p>Make show packs on an Android tablet or a computer. Saving a multi-gigabyte pack on an iPhone or iPad may not work.</p></details>
+      <p>Yes, from its web address in <b>Safari</b>. Open the address, tap <b>Share</b>, then <b>Add to Home Screen</b>, and always open it from that icon: Safari can clear a website's saved music if it isn't on the Home Screen.</p>
+      <p>To get the music, open <b>Settings › Download all music</b> and sign in with Google. If there's no sound while the ring/silent switch is on silent, update iOS.</p>
+      <p>The first download is about 2&nbsp;GB. Make sure there's room, and keep the screen on (Settings › Display &amp; Brightness › Auto-Lock) until it finishes.</p></details>
     <details><summary>The tablet screen turns off or locks during the game.</summary>
       <p><b>iPhone / iPad:</b> before the game, open the <b>Settings</b> app › <b>Display &amp; Brightness</b> › <b>Auto-Lock</b> and pick the longest time (or Never).</p>
       <p><b>Android:</b> change the tablet's own setting before the game: <b>Settings &gt; Display &gt; Screen timeout</b>, and pick the longest time (often 10 or 30 minutes). Some tablets also have <b>Settings &gt; Developer options &gt; Stay awake</b>, which keeps the screen on while it's charging.</p></details>
@@ -258,7 +231,7 @@
       <p>Check the tablet volume and the Master slider. Make sure the Bluetooth speaker is connected before opening the app. Buttons with dashed outlines don't have their song file on this device yet.</p></details>
     <details><summary>My phone or tablet is running out of space.</summary>
       <p>Open <b>Settings</b> (the gear), scroll to <b>Music on this device</b> and tap <b>Clean up storage</b>. The app checks your songs and shows what it would remove: extra copies of the same song, and songs no button uses. <b>Nothing is deleted until you tap Remove.</b></p>
-      <p>Extra copies are ticked for you; every button keeps playing. Songs no button uses are only removed if you tick them. Anything removed can be downloaded again with <b>Check for updates</b>.</p>
+      <p>Extra copies are ticked for you; every button keeps playing. Songs no button uses are only removed if you tick them. To start fresh, tick <b>Remove all songs</b>: the buttons stay, and you download the music again on wifi. Anything removed can be downloaded again with <b>Check for updates</b>.</p>
       <p>Old downloads also take space: delete <b>.zip</b>, <b>.rinkpack</b> and old <b>Rinkside</b> files from the <b>Files</b> app (iPhone) or <b>Files / My Files</b> (Android).</p></details>
     <details><summary>It asks “Already on this device”.</summary>
       <p>Some songs you're adding are already saved. <b>Keep the ones on this device</b> skips them; <b>Replace them</b> swaps in the files you picked. Either way the app doesn't save a second copy. <b>Cancel</b> adds nothing.</p></details>
@@ -269,7 +242,29 @@
       <p>Right after an update you'll see <b>Rinkside updated to …</b> once, with <b>See what's new</b>. Every version's changes are listed at the top of this Help, under <b>What's new in Rinkside</b>.</p>
       <p>The app always opens from the copy saved on your device, so it opens straight away even on weak rink wifi or with no internet.</p></details>
     <details><summary>I made a mess. Can I undo?</summary>
-      <p>To go back to the team's layout, open Settings and tap <b>Check for updates</b> (it offers the layout from Drive if yours is different). You can also open a layout file you saved earlier (Settings › Share and back up › <b>Open a layout file</b>), or use <b>Restore the built-in show</b> under <b>Advanced</b>. Your music stays on the device either way.</p></details>
+      <p>Yes. Open <b>Settings</b>, scroll to <b>Start over</b> and tap <b>Reset to the Drive layout</b> (tap it twice). It puts back the team's layout from Google Drive: what everyone else has. Your music stays.</p>
+      <p>No internet, or not signed in? It uses the layout built into the app instead and tells you. Tap <b>Check for updates</b> on wifi later to get anything newer.</p></details>
+
+    <div id="helpOrganizer" hidden>
+    <h3>For the organizer</h3>
+    <p class="hint">You see this because your Google account can edit the team's Drive folder.</p>
+    <details><summary>How do I publish an update for everyone?</summary>
+      <p>Anyone can change the show on their own device with <b>Edit</b>, but those changes stay on that device. Publishing them for everyone is for people with <b>Editor</b> access to the Hockey Music App folder in Google Drive. Volunteers have Viewer access, so they don't see Publish.</p>
+      <p>Tap <b>Check for updates</b> first, so you start from the newest layout. Make your changes in <b>Edit</b>, then open <b>Settings</b> and tap <b>Publish to Drive</b>. The first time, Google asks for permission to change files in Drive. The app shows what it will send (the layout and any new songs), then uploads it. New songs go into the matching category folder under Hockey Songs. Nothing in Drive is deleted, and Drive keeps earlier layouts in its version history (right-click the layout file › Manage versions).</p>
+      <p>Volunteers get the changes the next time they tap <b>Check for updates</b>.</p></details>
+    <details><summary>It says “Someone published since your last update”.</summary>
+      <p>Another editor (or you, from another device) published the layout after this device last got it. Publishing now would wipe out their changes, so the app asks first.</p>
+      <p><b>Get latest first</b> (best): puts Drive's layout on this device. Your changes are listed under <b>Publish to Drive</b> as changes to make again. Make them in Edit, publish, and the list clears.</p>
+      <p><b>Publish anyway</b>: replaces Drive's layout with yours. Theirs is still in Drive's version history if you need it. <b>Cancel</b> changes nothing.</p>
+      <p>To avoid it, only one person edits at a time, and always tap Check for updates before starting.</p></details>
+    <details><summary>Layout files, show packs and the Drive connection</summary>
+      <p>They're under <b>Settings › Advanced (organizer)</b>. Volunteers don't see them.</p>
+      <p><b>Layout file</b>: the buttons, playlists and teams in one small file. A backup, or a way to try a layout on one device without publishing it. Drive's version history usually does the same job.</p>
+      <p><b>Show pack</b>: everything including the music (1–4 GB), for a device with no internet. Make it on an Android tablet or a computer; saving one on an iPhone or iPad may not work.</p>
+      <p><b>Drive connection</b>: leave both boxes blank. They're only for pointing one device at a test folder.</p></details>
+    <details><summary>Can I edit on my computer instead of the tablet?</summary>
+      <p>Yes. Open the app's web address in Chrome on your computer, sign in with Check for updates, make your changes in Edit and tap <b>Publish to Drive</b>. Everyone gets them with Check for updates.</p></details>
+    </div>
     <p class="hint about" data-about></p>
   </div>
 </dialog>

@@ -1,5 +1,35 @@
 [
   {
+    "version": "3.0.0",
+    "date": "2026-10-21",
+    "notes": [
+      {
+        "type": "improved",
+        "text": "Simpler Settings: Add music folder, Add music files, Open Drive download and Show name are gone. Music comes from Check for updates, and new songs are added with Edit › Add songs."
+      },
+      {
+        "type": "new",
+        "text": "Start over › Reset to the Drive layout puts back the team's layout if you made a mess with Edit. Your music stays."
+      },
+      {
+        "type": "improved",
+        "text": "Clean up storage can now remove all the music from a device (this replaces Remove stored music)."
+      },
+      {
+        "type": "improved",
+        "text": "Organizers: layout files, show packs and the Drive connection moved to Settings › Advanced (organizer), which volunteers don't see."
+      },
+      {
+        "type": "new",
+        "text": "Organizers: if someone else published since your last update, Publish to Drive warns you first and offers Get latest first."
+      },
+      {
+        "type": "improved",
+        "text": "Help has a section for organizers, and the volunteer questions are simpler."
+      }
+    ]
+  },
+  {
     "version": "2.5.1",
     "date": "2026-10-08",
     "notes": [
