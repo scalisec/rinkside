@@ -48,7 +48,7 @@ const DEFAULTS = {
   follow: null,            // 3.1: teams shown on this device (null: decided by Drive access)
 };
 
-const APP_VERSION = '3.1.1';
+const APP_VERSION = '3.1.2';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -3265,11 +3265,18 @@ const Notes = {
   html(list, headings = list.length > 1) {
     return list.map(n => (headings ? `<p class="rn-head">Version ${esc(n.version)} · ${esc(this.date(n.date))}</p>` : '') + this.items(n)).join('');
   },
-  // Help › What's new: every version, newest open
+  // Help: the 3 newest versions at the top (What's new), every version at the end (App history)
+  ver(n, open) { return `<details class="rn-ver"${open ? ' open' : ''}><summary>Version ${esc(n.version)} · ${esc(this.date(n.date))}${n.version === APP_VERSION ? ' <small>(this version)</small>' : ''}</summary>${this.items(n)}</details>`; },
   renderHelp() {
     const list = window.RINKSIDE_NOTES || [];
-    $('#whatsNew').hidden = !list.length;
-    $('#notesList').innerHTML = list.map((n, i) => `<details class="rn-ver"${i === 0 ? ' open' : ''}><summary>Version ${esc(n.version)} · ${esc(this.date(n.date))}${n.version === APP_VERSION ? ' <small>(this version)</small>' : ''}</summary>${this.items(n)}</details>`).join('');
+    $('#whatsNew').hidden = $('#appHistory').hidden = !list.length;
+    $('#notesList').innerHTML = list.slice(0, 3).map((n, i) => this.ver(n, i === 0)).join('');
+    $('#toHistory').parentElement.hidden = list.length <= 3;
+    $('#historyList').innerHTML = list.map(n => this.ver(n, false)).join('');
+    if (!this._wired) {
+      this._wired = true;
+      $('#toHistory').addEventListener('click', e => { e.preventDefault(); $('#appHistory').open = true; $('#appHistory').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
+    }
   },
   openHelp() {
     renderAbout(); this.renderHelp();

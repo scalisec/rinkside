@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.1.2",
+    "date": "2026-10-22",
+    "notes": [
+      {
+        "type": "improved",
+        "text": "Help is shorter: only the last three updates are at the top. Every past update is under App history at the end of Help."
+      }
+    ]
+  },
+  {
     "version": "3.1.1",
     "date": "2026-10-22",
     "notes": [
