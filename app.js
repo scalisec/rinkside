@@ -306,6 +306,7 @@ const Packs = {
     for (const [id, p] of Object.entries(packs || {})) {
       const team = { ...this.clone(p.team), id };
       const i = s.teams.findIndex(t => t.id === id);
+      if (!team.logo && i >= 0 && s.teams[i].logo) { team.logo = s.teams[i].logo; team.shape = s.teams[i].shape; } // a pack without a logo keeps the library's
       if (i >= 0) s.teams[i] = team; else s.teams.push(team);
       for (const t of p.tabs) s.tabs.push({ ...this.clone(t), team: id });
       if (p.hide && p.hide.length) s.hide[id] = p.hide.slice();
