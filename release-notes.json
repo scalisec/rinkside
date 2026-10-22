@@ -6,8 +6,13 @@
       {
         "type": "improved",
         "text": "Help is shorter: only the last three updates are at the top. Every past update is under App history at the end of Help."
+      },
+      {
+        "type": "improved",
+        "text": "Small fixes now install by themselves, with no message: when you open the app and nothing is playing, the screen may blink for a second. Bigger updates still show the \"new version\" message."
       }
-    ]
+    ],
+    "quiet": true
   },
   {
     "version": "3.1.1",

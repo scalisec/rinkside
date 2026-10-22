@@ -5,7 +5,8 @@
      expected (for example a rink wifi "accept terms" page answering instead of GitHub), the
      update is skipped and the current version keeps working.
    - The app always opens straight from the saved copy, so weak wifi can't hold it up. A new
-     version downloads in the background and is used the next time the app is opened.
+     version downloads in the background and is used the next time the app is opened (or, for a
+     quiet release, as soon as the app is on screen with nothing playing; see activate below).
 
    Bump VERSION whenever you change app files. */
 const VERSION = 'rinkside-v31';
@@ -42,7 +43,12 @@ self.addEventListener('activate', e => {
   e.waitUntil((async () => {
     for (const k of await caches.keys()) if (k.startsWith('rinkside-') && k !== VERSION) await caches.delete(k);
     await self.clients.claim();
-    for (const c of await self.clients.matchAll({ type: 'window' })) c.postMessage({ type: 'rinkside-updated', version: VERSION });
+    // A release marked "quiet": true in release-notes.json (small, behind-the-scenes changes) sends a
+    // different message: versions before 3.1.2 ignore it (no banner; the new version is used the next
+    // time the app is opened), and 3.1.2 and later switch over by themselves when nothing is playing.
+    let quiet = false;
+    try { const r = await caches.match(new URL('release-notes.json', self.location).href, { cacheName: VERSION }); quiet = !!(await r.json())[0].quiet; } catch (err) {}
+    for (const c of await self.clients.matchAll({ type: 'window' })) c.postMessage({ type: quiet ? 'rinkside-updated-quiet' : 'rinkside-updated', version: VERSION });
   })());
 });
 

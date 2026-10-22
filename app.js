@@ -3240,6 +3240,7 @@ async function boot() {
     const hadCopy = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.addEventListener('message', e => {
       if (hadCopy && e.data && e.data.type === 'rinkside-updated') Update.ready();
+      if (hadCopy && e.data && e.data.type === 'rinkside-updated-quiet') Update.quiet();
     });
     // Look for a new version each time the app is opened or brought back to the screen (at most once a
     // minute), so a fix (or a step back to an earlier version) reaches phones the next time they open the app.
@@ -3326,7 +3327,32 @@ const Update = {
     };
     $('#updateLater').onclick = () => { el.hidden = true; };
   },
+  /* A quiet release (small fixes, marked "quiet": true in release-notes.json): no banner. Switch to
+     it by reloading, but only when that can't get in anyone's way: nothing playing or downloading,
+     no window open, not editing, and either the app has just opened / come back on screen and hasn't
+     been touched yet, or the next time it comes back on screen. It's on record in Help › App history. */
+  quiet() {
+    if (this.shown) return; // a banner for a bigger update is already up: that one wins
+    this.pending = true;
+    if (Date.now() - Seen.at < 20000 && !Seen.touched) this.applyQuiet();
+  },
+  async applyQuiet() {
+    if (!this.pending || this.shown || this._going) return;
+    if (!quiet() || document.querySelector('dialog[open]') || document.body.classList.contains('editing')) return;
+    this._going = true;
+    clearTimeout(Show._t);
+    await Store.put('kv', 'show', show).catch(() => {});
+    location.reload();
+  },
 };
+// When the app was last opened or brought back on screen, and whether it's been touched since.
+const Seen = { at: Date.now(), touched: false };
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  Seen.at = Date.now(); Seen.touched = false;
+  Update.applyQuiet();
+});
+document.addEventListener('pointerdown', () => { Seen.touched = true; }, { capture: true });
 
 /* Once, right after an update: "Rinkside updated to 2.5.0 · See what's new". Not on a brand
    new install, and not while coming back from Google sign-in (it shows next time instead). */
@@ -3339,7 +3365,8 @@ const News = {
     if (!seen && HAD_SETTINGS) seen = '2.4.0';
     if (!seen || cmpVer(APP_VERSION, seen) <= 0) { this.mark(); return; }
     if (signingIn) return;
-    const fresh = Notes.between(window.RINKSIDE_NOTES, seen, APP_VERSION);
+    // quiet releases don't get the "updated" note (they're still listed in Help)
+    const fresh = Notes.between(window.RINKSIDE_NOTES, seen, APP_VERSION).filter(n => !n.quiet);
     if (!fresh.length) { this.mark(); return; }
     const show = () => {
       if (!quiet() || document.querySelector('dialog[open]')) { setTimeout(show, 2000); return; }
