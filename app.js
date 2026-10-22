@@ -42,9 +42,13 @@ const DEFAULTS = {
   driveEditor: false,      // the signed-in Google account can edit the Drive folder (organizer): shows Publish to Drive
   localEdits: false,       // this device's layout was edited since it last came from (or went to) Drive
   driveLayout: null,       // { id, name, modifiedTime } of the last layout loaded from Drive
+  teamEditor: [],          // 3.1: teams whose Drive folder this Google account can edit (their music volunteer)
+  teamAccess: [],          // 3.1: teams whose Drive folder this account can see
+  drivePacks: {},          // 3.1: teamId -> { id, name, modifiedTime } of the team pack last loaded or published
+  follow: null,            // 3.1: teams shown on this device (null: decided by Drive access)
 };
 
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '3.1.0';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -197,8 +201,13 @@ const Show = {
       .map(g => ({ label: str(g.label, '', 60), prefix: str(g.prefix, '', 60), color: safeColor(g.color, '#8b95a1') }));
     s.gameday = { situations: groups(gd.situations), moments: (Array.isArray(gd.moments) ? gd.moments : []).map(m => str(m, '', 60)), endings: groups(gd.endings) };
     s.tabs = s.tabs.filter(t => t && typeof t === 'object');
+    const teamIds = new Set(s.teams.map(t => t.id));
+    const hide = s.hide && typeof s.hide === 'object' ? s.hide : {};
+    s.hide = {};
+    for (const [k, v] of Object.entries(hide)) if (teamIds.has(k) && Array.isArray(v)) s.hide[k] = v.filter(x => typeof x === 'string' && x.length <= 64).slice(0, 200);
     for (const tab of s.tabs) {
       tab.id = id(tab.id); tab.name = str(tab.name, 'Tab', 60); tab.color = safeColor(tab.color, null);
+      if (tab.team != null) { tab.team = String(tab.team).slice(0, 64); if (!teamIds.has(tab.team)) delete tab.team; }
       tab.items = (Array.isArray(tab.items) ? tab.items : []).filter(it => it && ['sound', 'playlist', 'next'].includes(it.type));
       for (const it of tab.items) {
         it.id = id(it.id); it.name = str(it.name, it.type === 'next' ? 'Next song' : 'Untitled', 200); it.color = safeColor(it.color, null);
@@ -230,6 +239,19 @@ const Show = {
     return [...idx.sounds.values()].filter(s => { const k = keyOf(s); return !seen.has(k) && seen.add(k); });
   },
   tab(id) { return show.tabs.find(t => t.id === id); },
+  // tabs for the team that's picked now: the shared tabs it hasn't hidden, plus its own tabs
+  hiddenFor(teamId) { return new Set((show.hide && show.hide[teamId]) || []); },
+  visibleTabs(all = typeof Edit !== 'undefined' && Edit.on) {
+    const team = Teams.current?.id, hidden = this.hiddenFor(team);
+    return show.tabs.filter(t => (t.team ? t.team === team : (all || !hidden.has(t.id))));
+  },
+  // songs and playlists for the team that's picked now (Game Day groups, goal horns, pickers)
+  visibleSounds() {
+    const seen = new Set(), out = [];
+    for (const t of this.visibleTabs(false)) for (const i of t.items) if (i.type === 'sound') { const k = keyOf(i); if (!seen.has(k)) { seen.add(k); out.push(i); } }
+    return out;
+  },
+  visiblePlaylists() { return this.visibleTabs(false).flatMap(t => t.items.filter(i => i.type === 'playlist')); },
   removeItem(id) {
     const tab = idx.tabOf.get(id);
     if (tab) tab.items = tab.items.filter(i => i.id !== id);
@@ -238,6 +260,72 @@ const Show = {
     for (const tr of [...tracks]) if (tr.sound.id === id) tr.stop();
     if (activePL && activePL.pl.id === id) activePL = null;
     this.changed();
+  },
+};
+
+/* 3.1: one shared library (the base layout in the team's Drive folder, run by the organizer)
+   plus a "team pack" for each team that keeps its own folder in its own Google Drive: the team's
+   goal horn, intro and game music, its own tabs and songs, and the shared tabs it hides.
+   Teams without a folder (or before theirs is set up) use their entry in the base as before.
+   The phone keeps the combined layout under 'show' exactly as 3.0 did, so stepping back to 3.0
+   keeps working; the pieces it came from are kept too, so each can be published on its own. */
+const Packs = {
+  cfg: { teams: [] }, // Rinkside-Teams.json: [{ id, name, folder }]
+  base: null,         // the base layout as last loaded from (or sent to) Drive
+  packs: {},          // teamId -> team pack as last loaded from (or sent to) Drive
+  FILE: 'Rinkside-Teams.json',
+  async load() {
+    try { this.cfg = (await Store.get('kv', 'teamsCfg')) || { teams: [] }; } catch (e) {}
+    try { this.base = (await Store.get('kv', 'baseShow')) || null; } catch (e) {}
+    try { this.packs = (await Store.get('kv', 'packs')) || {}; } catch (e) {}
+  },
+  async save() {
+    await Store.put('kv', 'teamsCfg', this.cfg).catch(() => {});
+    await Store.put('kv', 'baseShow', this.base).catch(() => {});
+    await Store.put('kv', 'packs', this.packs).catch(() => {});
+  },
+  folderOf(id) { return (this.cfg.teams || []).find(t => t.id === id)?.folder || ''; },
+  normaliseCfg(j) {
+    const teams = (j && Array.isArray(j.teams) ? j.teams : []).filter(t => t && typeof t === 'object').map(t => ({
+      id: String(t.id || '').slice(0, 64), name: String(t.name || '').slice(0, 80), folder: (String(t.folder || '').match(/[\w-]{10,}/) || [''])[0] }));
+    return { format: 'rinkside-teams', version: 1, teams: teams.filter(t => t.id) };
+  },
+  normalisePack(p, teamId) {
+    if (!p || p.format !== 'rinkside-team') throw new Error('not a team pack');
+    const team = { ...(p.team || {}), id: teamId };
+    // reuse the layout checks: a pack is a small layout with one team
+    const s = Show.normalise({ format: 'rinkside-show', name: 'pack', teams: [team], tabs: Array.isArray(p.tabs) ? p.tabs : [], gameday: {} });
+    s.tabs.forEach(t => delete t.team);
+    return { format: 'rinkside-team', version: 1, team: s.teams[0], tabs: s.tabs, hide: (Array.isArray(p.hide) ? p.hide : []).filter(x => typeof x === 'string').slice(0, 200) };
+  },
+  clone: o => JSON.parse(JSON.stringify(o)),
+  merge(base, packs = this.packs) {
+    const s = this.clone(base);
+    s.tabs = s.tabs.filter(t => !t.team);
+    s.hide = {};
+    for (const [id, p] of Object.entries(packs || {})) {
+      const team = { ...this.clone(p.team), id };
+      const i = s.teams.findIndex(t => t.id === id);
+      if (i >= 0) s.teams[i] = team; else s.teams.push(team);
+      for (const t of p.tabs) s.tabs.push({ ...this.clone(t), team: id });
+      if (p.hide && p.hide.length) s.hide[id] = p.hide.slice();
+    }
+    return Show.normalise(s);
+  },
+  // what the organizer publishes: everything except the team packs
+  splitBase(cur = show) {
+    const s = this.clone(cur);
+    delete s.hide;
+    s.tabs = s.tabs.filter(t => !t.team);
+    const baseTeams = (this.base && this.base.teams) || [];
+    s.teams = s.teams.map(t => this.packs[t.id] ? (baseTeams.find(b => b.id === t.id) || { ...t, goalHorn: null, pregame: null, game: null }) : t);
+    return s;
+  },
+  // what a team's music volunteer publishes
+  splitPack(teamId, cur = show) {
+    const team = this.clone(cur.teams.find(t => t.id === teamId));
+    const tabs = this.clone(cur.tabs.filter(t => t.team === teamId)); tabs.forEach(t => delete t.team);
+    return { format: 'rinkside-team', version: 1, team, tabs, hide: ((cur.hide || {})[teamId] || []).slice() };
   },
 };
 
@@ -536,13 +624,39 @@ function probeDuration(blob) {
 
 /* ==================================================================== 5. TEAMS */
 
+/* Who can change what (3.1). The organizer (an Editor of the shared Drive folder) changes the
+   shared library: its tabs, Game Day groups and the teams that don't have their own folder. A
+   team's music volunteer (an Editor of that team's own folder) changes the team: goal horn,
+   intro, game music, its own tabs and songs, and which shared tabs it hides. Everyone else
+   plays; Check for updates brings them every change. */
+const Perm = {
+  admin() { return !!settings.driveEditor; },
+  team(id) { return !!id && (settings.teamEditor || []).includes(id); },
+  any() { return this.admin() || (settings.teamEditor || []).length > 0; },
+  tab(t) { return !!t && (t.team ? this.team(t.team) : this.admin()); },
+  item(it) { return this.tab(idx.tabOf.get(it.id)); },
+  teamSettings(team) { return !!team && (this.team(team.id) || (this.admin() && !Packs.packs[team.id] && !Packs.folderOf(team.id))); },
+  hideTabs(teamId) { return this.team(teamId); },
+};
+
 const Teams = {
-  get current() { return show.teams.find(t => t.id === settings.team) || show.teams[0]; },
+  get current() { const l = this.list(); return l.find(t => t.id === settings.team) || l[0] || show.teams[0]; },
+  // the teams in the dropdown: organizers see every team; others the teams on this device
+  list() {
+    if (Perm.admin()) return show.teams;
+    let ids = settings.follow;
+    if (!ids || !ids.length) {
+      const access = (settings.teamAccess || []).filter(id => show.teams.some(t => t.id === id));
+      ids = access.length ? access : null;
+    }
+    const l = ids ? show.teams.filter(t => ids.includes(t.id)) : show.teams;
+    return l.length ? l : show.teams;
+  },
   goalHorn(team) {
     return (team.goalHorn && idx.sounds.get(team.goalHorn)) || this.allGoalHorns()[0] || null;
   },
   playlist(team, kind) { return (team[kind] && idx.playlists.get(team[kind])) || null; },
-  allGoalHorns() { return Show.uniqueSounds().filter(s => GOAL_HORN.include.test(s.name) && !GOAL_HORN.exclude.test(s.name)); },
+  allGoalHorns() { return Show.visibleSounds().filter(s => GOAL_HORN.include.test(s.name) && !GOAL_HORN.exclude.test(s.name)); },
   badge(team, cls = 'badge') {
     if (team.logo) return `<span class="${cls} ${team.shape === 'square' ? 'square' : 'round'}"><img src="${esc(safeImage(team.logo) || '')}" alt="${esc(team.full)} logo"></span>`;
     return `<span class="${cls} mono" style="--tc:${esc(team.color)}">${esc(team.name.slice(0, 1))}</span>`;
@@ -624,7 +738,7 @@ const startsWith = (s, prefix) => {
 };
 
 function gameDaySections() {
-  const all = Show.uniqueSounds();
+  const all = Show.visibleSounds();
   const gd = show.gameday;
   const groups = (list, key) => list.map((g, i) => ({
     id: `g:${key}:${i}`, type: 'group', name: g.label || g.prefix, cssColor: g.color,
@@ -633,7 +747,7 @@ function gameDaySections() {
   const out = [];
   out.push({ key: 'situations', title: 'Whistles', big: true, items: groups(gd.situations, 's'), editable: true });
   out.push({ key: 'moments', title: 'Moments', items: all.filter(s => gd.moments.some(p => startsWith(s, p))), editable: true });
-  const pls = [...idx.playlists.values()];
+  const pls = Show.visiblePlaylists();
   if (pls.length) out.push({ key: 'playlists', title: 'Playlists', items: [{ id: 'next', type: 'next', name: 'Next song', color: '#bfef45' }, ...pls] });
   out.push({ key: 'endings', title: 'Game over', big: true, items: groups(gd.endings, 'e'), editable: true });
   out.push({ key: 'horns', title: 'All goal horns', items: Teams.allGoalHorns() });
@@ -994,7 +1108,7 @@ const UI = {
       if (!b) return;
       const item = this.itemsById.get(b.dataset.id);
       if (!item) return;
-      if (Edit.on) { Edit.openFor(item, b); return; }
+      if (Edit.on) { if (Edit.allowed(item, b)) Edit.openFor(item, b); return; }
       audioCtx();
       buzz();
       b.classList.remove('hit'); void b.offsetWidth; b.classList.add('hit');
@@ -1069,6 +1183,7 @@ const UI = {
     if (act === 'settings') Settings.open();
     if (act === 'drive') { Settings.open(); setTimeout(() => { $('#driveSection').scrollIntoView({ block: 'start' }); if (Drive.ready()) $('#driveCheck').click(); }, 50); }
     if (act === 'tab-settings') Edit.tab(Show.tab(el.dataset.tabId));
+    if (act === 'hide-tab') Edit.toggleHidden(el.dataset.tabId);
     if (act === 'groups') Edit.groups(el.dataset.section);
     if (act === 'add-playlist') Edit.addPlaylist(Show.tab(el.dataset.tabId));
     if (act === 'add-next') Edit.addNext(Show.tab(el.dataset.tabId));
@@ -1108,11 +1223,12 @@ const UI = {
   },
   renderTabs() {
     const tabs = [`<button class="tab gameday" role="tab" data-tab="gameday" aria-selected="${this.view === 'gameday'}">${ICONS.horn}Game Day</button>`];
-    for (const t of show.tabs) {
-      tabs.push(`<button class="tab" role="tab" data-tab="${esc(t.id)}" aria-selected="${this.view === t.id}"
+    const hidden = Show.hiddenFor(Teams.current?.id);
+    for (const t of Show.visibleTabs()) {
+      tabs.push(`<button class="tab${hidden.has(t.id) ? ' is-hidden' : ''}" role="tab" data-tab="${esc(t.id)}" aria-selected="${this.view === t.id}"
         style="--c:${esc(t.color || '#4d4d4d')};--on:${hexLight(t.color) ? '#0b131a' : '#fff'}"><i></i>${esc(t.name)}<em class="num">${t.items.length}</em></button>`);
     }
-    if (Edit.on) tabs.push(`<button class="tab new-tab" data-new-tab>${ICONS.plus}New tab</button>`);
+    if (Edit.on && (Perm.admin() || Perm.team(Teams.current?.id))) tabs.push(`<button class="tab new-tab" data-new-tab>${ICONS.plus}New tab</button>`);
     $('#tabs').innerHTML = tabs.join('');
   },
   padHtml(item) {
@@ -1197,7 +1313,7 @@ const UI = {
       const q = this.query.toLowerCase();
       const seen = new Set();
       const hits = [];
-      for (const t of show.tabs) for (const i of t.items) {
+      for (const t of Show.visibleTabs(false)) for (const i of t.items) {
         const k = i.type === 'sound' ? keyOf(i) : i.id;
         if (i.type === 'next' || seen.has(k)) continue;
         if (i.name.toLowerCase().includes(q)) { seen.add(k); hits.push(i); }
@@ -1208,19 +1324,25 @@ const UI = {
       html += this.heroHtml();
       for (const sec of gameDaySections()) {
         if (!sec.items.length && !(Edit.on && sec.editable)) continue;
-        const editBtn = Edit.on && sec.editable ? `<button class="mini" data-ui="groups" data-section="${sec.key}">${ICONS.pen}Edit groups</button>` : '';
+        const editBtn = Edit.on && sec.editable && Perm.admin() ? `<button class="mini" data-ui="groups" data-section="${sec.key}">${ICONS.pen}Edit groups</button>` : '';
         html += `<h2 class="section-title">${esc(sec.title)}<span>${sec.items.length}</span>${editBtn}</h2>`;
         html += sec.items.length
           ? `<div class="grid${sec.big ? ' big' : ''}">${sec.items.map(i => this.padHtml(i)).join('')}</div>`
           : `<p class="hint">Nothing here yet. Tap Edit groups to add some.</p>`;
       }
     } else {
-      const tab = Show.tab(this.view) || show.tabs[0];
+      const vis = Show.visibleTabs();
+      const tab = vis.find(t => t.id === this.view) || vis[0];
       if (!tab) { this.view = 'gameday'; return this.renderMain(); }
-      const editBtn = Edit.on ? `<button class="mini" data-ui="tab-settings" data-tab-id="${esc(tab.id)}">${ICONS.pen}Tab settings</button>` : '';
-      html += `<h2 class="section-title tab-title" style="--c:${esc(tab.color || '#8ea2b3')}">${esc(tab.name)}<span>${tab.items.length} buttons</span>${editBtn}</h2>`;
+      const mine = Edit.on && Perm.tab(tab);
+      const cur = Teams.current, hidden = Show.hiddenFor(cur?.id).has(tab.id);
+      const hideBtn = Edit.on && !tab.team && Perm.hideTabs(cur?.id)
+        ? `<button class="mini" data-ui="hide-tab" data-tab-id="${esc(tab.id)}">${hidden ? `Show this tab for ${esc(cur.name)}` : `Hide this tab for ${esc(cur.name)}`}</button>` : '';
+      const editBtn = mine ? `<button class="mini" data-ui="tab-settings" data-tab-id="${esc(tab.id)}">${ICONS.pen}Tab settings</button>` : '';
+      html += `<h2 class="section-title tab-title" style="--c:${esc(tab.color || '#8ea2b3')}">${esc(tab.name)}<span>${tab.items.length} buttons</span>${editBtn}${hideBtn}</h2>`;
+      if (Edit.on && !mine) html += `<p class="hint lock-note">${tab.team ? 'This tab belongs to another team.' : 'This tab is part of the shared library, so only the organizer can change it.'}${hidden ? ` It's hidden for ${esc(cur.name)}.` : ''}</p>`;
       let tiles = '';
-      if (Edit.on) {
+      if (mine) {
         tiles = `<label class="pad add-tile">${ICONS.plus}<span>Add songs</span><small>Pick song files</small><input type="file" multiple accept="audio/*,.mp3,.m4a,.wav" data-add-songs="${esc(tab.id)}"></label>
           <button class="pad add-tile" data-ui="add-playlist" data-tab-id="${esc(tab.id)}">${ICONS.list}<span>Add playlist</span></button>
           <button class="pad add-tile" data-ui="add-next" data-tab-id="${esc(tab.id)}">${ICONS.next}<span>Add Next-song button</span></button>`;
@@ -1327,9 +1449,9 @@ const UI = {
     m.style.left = Math.max(8, Math.min(r.left, innerWidth - 290)) + 'px';
     m.style.top = (r.bottom + 6) + 'px';
     const cur = Teams.current.id;
-    m.innerHTML = `<h4>${Edit.on ? 'Edit a team' : 'Team'}</h4>` + show.teams.map(t => `<button class="trow${t.id === cur ? ' on' : ''}" role="menuitemradio" aria-checked="${t.id === cur}" data-team="${esc(t.id)}">
-        ${Teams.badge(t)}<span>${esc(t.name)}<small>${esc(t.full)}</small></span>${Edit.on ? `<span class="tick">${ICONS.pen}</span>` : (t.id === cur ? '<span class="tick">✓</span>' : '')}</button>`).join('')
-      + (Edit.on ? `<button class="trow add" role="menuitem" data-add-team>${ICONS.plus}<span>Add a team</span></button>` : '');
+    m.innerHTML = `<h4>${Edit.on ? 'Edit a team' : 'Team'}</h4>` + Teams.list().map(t => `<button class="trow${t.id === cur ? ' on' : ''}" role="menuitemradio" aria-checked="${t.id === cur}" data-team="${esc(t.id)}">
+        ${Teams.badge(t)}<span>${esc(t.name)}<small>${esc(t.full)}</small></span>${Edit.on && Perm.teamSettings(t) ? `<span class="tick">${ICONS.pen}</span>` : (t.id === cur ? '<span class="tick">✓</span>' : '')}</button>`).join('')
+      + (Edit.on && Perm.admin() ? `<button class="trow add" role="menuitem" data-add-team>${ICONS.plus}<span>Add a team</span></button>` : '');
     document.body.append(scrim, m);
     const close = () => { this.teamMenu(false); btn.focus(); };
     scrim.addEventListener('click', close);
@@ -1341,10 +1463,11 @@ const UI = {
       this.teamMenu(false);
       if (add) { Edit.team(Teams.current); setTimeout(() => $('[data-act="teamAdd"]')?.click(), 0); return; }
       const id = row.dataset.team;
-      if (Edit.on) { Edit.team(show.teams.find(t => t.id === id)); return; }
+      const t = show.teams.find(x => x.id === id);
+      if (Edit.on && Perm.teamSettings(t)) { Edit.team(t); return; }
       if (id === settings.team) return;
       settings.team = id; Prefs.save();
-      Teams.apply(); this.renderHead(); this.renderMain(); this.renderDock();
+      Teams.apply(); this.renderHead(); this.renderTabs(); this.renderMain(); this.renderDock();
       this.toast(`${Teams.current.full} selected.`);
     });
     (m.querySelector('.trow.on') || m.querySelector('.trow'))?.focus();
@@ -1417,6 +1540,27 @@ const Edit = {
     setTimeout(() => { if (b.isConnected) reset(); }, 3500);
   },
 
+  // can this person change that button? (if not, it just plays, with a word about why)
+  allowed(item, el) {
+    let ok;
+    if ((el && el.dataset.hero === 'team') || item.type === 'gamemusic') ok = Perm.teamSettings(Teams.current);
+    else if (item.type === 'group') ok = Perm.admin();
+    else if (item.type === 'next' && item.id === 'next') ok = true;
+    else ok = Perm.item(item);
+    if (!ok) UI.toast(item.type === 'group' || !(idx.tabOf.get(item.id)?.team) ? 'That\'s part of the shared library: only the organizer can change it.' : 'That belongs to another team.');
+    return ok;
+  },
+  toggleHidden(tabId) {
+    const team = Teams.current?.id;
+    if (!Perm.hideTabs(team)) return;
+    show.hide = show.hide || {};
+    const set = new Set(show.hide[team] || []);
+    if (set.has(tabId)) set.delete(tabId); else set.add(tabId);
+    show.hide[team] = [...set];
+    Show.changed(); UI.renderTabs(); UI.renderMain();
+    UI.toast(set.has(tabId) ? `Hidden for ${Teams.current.name}. Publish the team to share it.` : `Shown for ${Teams.current.name}.`);
+  },
+  editableTabs() { return Show.visibleTabs(true).filter(t => Perm.tab(t)); },
   openFor(item, el) {
     if (el && el.dataset.hero === 'team') { this.team(Teams.current); return; }
     if (item.type === 'sound') this.sound(item);
@@ -1431,8 +1575,8 @@ const Edit = {
     this.cur = { kind: 'sound', ref: s };
     const tab = idx.tabOf.get(s.id);
     const has = Library.has(s);
-    const tabsOpt = show.tabs.map(t => `<option value="${esc(t.id)}"${t === tab ? ' selected' : ''}>${esc(t.name)}</option>`).join('');
-    const copyOpt = show.tabs.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
+    const tabsOpt = this.editableTabs().map(t => `<option value="${esc(t.id)}"${t === tab ? ' selected' : ''}>${esc(t.name)}</option>`).join('');
+    const copyOpt = this.editableTabs().map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
     this.show('Edit button', `
       <label class="field">Button name<input type="text" data-f="name" value="${esc(s.name)}" autocomplete="off"></label>
       <p class="hint">Tip: start the name with a situation, like “Penalty - Song - Artist”, and it joins that Game Day group.</p>
@@ -1556,7 +1700,7 @@ const Edit = {
   team(team) {
     this.cur = { kind: 'team', ref: team };
     const horns = Teams.allGoalHorns();
-    const pls = [...idx.playlists.values()];
+    const pls = Show.visiblePlaylists();
     const opt = (list, cur, none) => `<option value="">${esc(none)}</option>` +
       list.map(x => `<option value="${esc(x.id)}"${x.id === cur ? ' selected' : ''}>${esc(x.name)}</option>`).join('');
     const autoHorn = horns[0];
@@ -1578,8 +1722,9 @@ const Edit = {
         <label class="field">Pregame playlist<select data-f="pregame">${opt(pls, team.pregame, 'None')}</select></label>
         <label class="field">Game music playlist<select data-f="game">${opt(pls, team.game, 'None')}</select></label>
       </div>
-      <div class="row"><button class="mini" data-act="teamAdd">${ICONS.plus}Add another team</button><span class="spacer"></span>
-        ${show.teams.length > 1 ? '<button class="mini danger" data-act="delete">Delete team</button>' : ''}</div>`);
+      ${Perm.admin() ? `<div class="row"><button class="mini" data-act="teamAdd">${ICONS.plus}Add another team</button><span class="spacer"></span>
+        ${show.teams.length > 1 && !Packs.folderOf(team.id) ? '<button class="mini danger" data-act="delete">Delete team</button>' : ''}</div>` : ''}
+      ${Packs.folderOf(team.id) ? `<p class="hint">${esc(team.full)} has its own Drive folder: ${Perm.team(team.id) ? 'tap Publish team in Settings to send these changes to the team.' : 'its music volunteer looks after these settings.'}</p>` : ''}`);
   },
 
   /* ---------- field changes ---------- */
@@ -1745,6 +1890,7 @@ const Edit = {
   },
   newTab() {
     const t = { id: uid(), name: 'New tab', color: SWATCHES[show.tabs.length % SWATCHES.length], items: [] };
+    if (!Perm.admin() && Perm.team(Teams.current?.id)) t.team = Teams.current.id;
     show.tabs.push(t);
     Show.changed();
     UI.view = t.id;
@@ -2026,9 +2172,9 @@ const Drive = {
   },
 
   // every file under the folder, with its path inside it ("Hockey Songs/Rock/Song.mp3")
-  async listAll(withFolders = false) {
+  async listAll(withFolders = false, root = this.folderId()) {
     const out = [], folders = [];
-    const queue = [{ id: this.folderId(), path: '' }];
+    const queue = [{ id: root, path: '' }];
     while (queue.length) {
       const f = queue.shift();
       let token = '';
@@ -2047,6 +2193,24 @@ const Drive = {
     }
     return withFolders ? { files: out, folders } : out;
   },
+  pickPack(files) {
+    return files.filter(f => /\.rinkside-team\.json$/i.test(f.name))
+      .sort((a, b) => (a.path.includes('/') - b.path.includes('/')) || b.modifiedTime.localeCompare(a.modifiedTime))[0] || null;
+  },
+  async readJson(file) { return JSON.parse((await (await this.get('files/' + file.id, { alt: 'media' })).text()).replace(/^\uFEFF/, '')); },
+  // the team folders in Rinkside-Teams.json that this Google account can see
+  async teamFolders(cfg, say) {
+    const out = [];
+    for (const t of cfg.teams.filter(t => t.folder)) {
+      let tf;
+      try { tf = await (await this.get('files/' + t.folder, { fields: 'id,name,capabilities(canAddChildren)' })).json(); }
+      catch (e) { if (/drive:(403|404)/.test(e.message)) continue; throw e; }
+      say?.(`Looking at ${t.name || tf.name}…`);
+      const files = await this.listAll(false, t.folder);
+      out.push({ team: t.id, name: t.name || tf.name, folder: tf, editor: !!tf.capabilities?.canAddChildren, files, pack: this.pickPack(files) });
+    }
+    return out;
+  },
   pickLayout(files) {
     return files.filter(f => /\.rinkside\.json$/i.test(f.name))
       .sort((a, b) => (a.path.includes('/') - b.path.includes('/')) || b.modifiedTime.localeCompare(a.modifiedTime))[0] || null;
@@ -2060,12 +2224,25 @@ const Drive = {
     const folder = await (await this.get('files/' + this.folderId(), { fields: 'id,name,capabilities(canAddChildren)' })).json();
     if (Auth.enabled()) this.setEditor(!!folder.capabilities?.canAddChildren);
     const files = await this.listAll();
-    const songs = files.filter(f => AUDIO_EXT.test(f.name));
+    // 3.1: the list of teams and their own folders (Rinkside-Teams.json, kept by the organizer)
+    const cfgFile = files.find(f => !f.path.includes('/') && f.name === Packs.FILE);
+    let cfg = { format: 'rinkside-teams', version: 1, teams: [] };
+    if (cfgFile) { try { cfg = Packs.normaliseCfg(await this.readJson(cfgFile)); } catch (e) { console.error(e); } }
+    Packs.cfg = cfg; await Store.put('kv', 'teamsCfg', cfg).catch(() => {});
+    const teams = await this.teamFolders(cfg, say);
+    settings.teamAccess = teams.map(t => t.team);
+    settings.teamEditor = teams.filter(t => t.editor).map(t => t.team);
+    Prefs.save(); applyRole();
+    const songs = [...files.filter(f => AUDIO_EXT.test(f.name)), ...teams.flatMap(t => t.files.filter(f => AUDIO_EXT.test(f.name)))];
     const layouts = files.filter(f => /\.rinkside\.json$/i.test(f.name))
       .sort((a, b) => (a.path.includes('/') - b.path.includes('/')) || b.modifiedTime.localeCompare(a.modifiedTime));
     const layout = layouts[0] || null;
     const last = settings.driveLayout;
-    const layoutNew = !!layout && !(last && last.id === layout.id && last.modifiedTime === layout.modifiedTime);
+    const baseNew = !!layout && (!Packs.base || !(last && last.id === layout.id && last.modifiedTime === layout.modifiedTime));
+    const packsNew = teams.filter(t => t.pack).filter(t => { const l = (settings.drivePacks || {})[t.team]; return !Packs.packs[t.team] || !l || l.id !== t.pack.id || l.modifiedTime !== t.pack.modifiedTime; })
+      .map(t => ({ team: t.team, name: t.name, file: t.pack }));
+    const packsGone = Object.keys(Packs.packs).filter(id => !teams.some(t => t.team === id && t.pack));
+    const layoutNew = baseNew || packsNew.length > 0 || packsGone.length > 0;
 
     say(`Comparing ${songs.length} songs with this device…`);
     const manifest = (await Store.get('kv', 'driveManifest')) || {};
@@ -2091,7 +2268,7 @@ const Drive = {
     const local = [...new Set([...(await Store.keys('audio')), ...Library.mem.keys()])];
     const extra = songs.length ? local.filter(k => !tails.has(tail(k))) : []; // never offer to empty the device
     if (layout) layout.load = () => this.get('files/' + layout.id, { alt: 'media' }).then(r => r.text());
-    this.plan = { source: 'drive', folder, layout, layoutNew, songs, get, update, extra };
+    this.plan = { source: 'drive', folder, layout, baseNew, packsNew, packsGone, layoutNew, songs, get, update, extra };
     return this.plan;
   },
 
@@ -2116,25 +2293,34 @@ const Drive = {
     applyRole();
   },
 
-  /* Publish: send this device's layout, and any songs it uses that Drive doesn't have yet,
-     to the Drive folder. Songs go into the matching category folder under Hockey Songs.
-     Nothing in Drive is ever deleted. */
-  async publishPlan(say) {
+  /* Publish: send a layout, and any songs it uses that Drive doesn't have yet. target 'base' is
+     the shared library (organizer: the layout file in the team's Drive folder, new songs into the
+     matching category folder under Hockey Songs). A team id is that team's pack (its music
+     volunteer: the .rinkside-team.json file in the team's own folder, new songs in a folder named
+     after the tab). Nothing in Drive is ever deleted. */
+  async publishPlan(say, target = 'base') {
     if (navigator.onLine === false) throw new Error('drive:offline');
     if (!Auth.token() || !Auth.canWrite()) throw new Error('drive:needwrite');
-    say('Looking at the Google Drive folder…');
-    const root = this.folderId();
+    const isBase = target === 'base';
+    const team = isBase ? null : show.teams.find(t => t.id === target);
+    const root = isBase ? this.folderId() : Packs.folderOf(target);
+    if (!root || (!isBase && !team)) throw new Error('drive:noteamfolder');
+    say(isBase ? 'Looking at the Google Drive folder…' : `Looking at ${team.full}'s Drive folder…`);
     const folder = await (await this.get('files/' + root, { fields: 'id,name,capabilities(canAddChildren)' })).json();
-    this.setEditor(!!folder.capabilities?.canAddChildren);
-    if (!folder.capabilities?.canAddChildren) throw new Error('drive:noteditor');
-    const { files, folders } = await this.listAll(true);
-    const layout = this.pickLayout(files);
-    const songsRoot = folders.find(f => !f.parent && f.name.toLowerCase() === 'hockey songs') || { id: root, path: '', name: folder.name };
+    const can = !!folder.capabilities?.canAddChildren;
+    if (isBase) this.setEditor(can);
+    else { settings.teamEditor = [...new Set([...(settings.teamEditor || []).filter(x => x !== target), ...(can ? [target] : [])])]; Prefs.save(); applyRole(); }
+    if (!can) throw new Error(isBase ? 'drive:noteditor' : 'drive:noteditor-team');
+    const { files, folders } = await this.listAll(true, root);
+    const known = isBase ? files : [...files, ...(await this.listAll(false))]; // a team can use songs from the shared library
+    const layout = isBase ? this.pickLayout(files) : this.pickPack(files);
+    const songsRoot = isBase ? (folders.find(f => !f.parent && f.name.toLowerCase() === 'hockey songs') || { id: root, path: '', name: folder.name }) : { id: root, path: '', name: folder.name };
     const tails = new Set(), bases = new Set();
-    for (const f of files) if (AUDIO_EXT.test(f.name)) { const k = norm(f.path).split('/'); tails.add(k.slice(-2).join('/')); bases.add(k[k.length - 1]); }
+    for (const f of known) if (AUDIO_EXT.test(f.name)) { const k = norm(f.path).split('/'); tails.add(k.slice(-2).join('/')); bases.add(k[k.length - 1]); }
     say('Comparing this device with Drive…');
     const uploads = [], seen = new Set();
-    for (const s of Show.uniqueSounds()) {
+    for (const tab of show.tabs.filter(t => (isBase ? !t.team : t.team === target))) for (const s of tab.items) {
+      if (s.type !== 'sound') continue;
       const key = Library.resolve(s);
       if (!key || seen.has(key)) continue;
       const orig = String(s.file).replace(/\\/g, '/').split('/').filter(Boolean);
@@ -2144,15 +2330,17 @@ const Drive = {
       seen.add(key);
       const blob = await Library.blobByKey(key);
       if (!blob) continue;
-      const folderName = orig.length > 1 ? orig[orig.length - 2] : (idx.tabOf.get(s.id)?.name || 'New Songs');
+      const folderName = isBase && orig.length > 1 ? orig[orig.length - 2] : (tab.name || 'New Songs');
       uploads.push({ key, file: norm(s.file), name: orig[orig.length - 1], folderName, size: blob.size, type: blob.type || audioType(s.file) || 'audio/mpeg' });
     }
+    const make = () => (isBase ? Packs.splitBase(show) : Packs.splitPack(target));
+    const tidy = j => (isBase ? Show.normalise(Packs.clone(j)) : Packs.normalisePack(Packs.clone(j), target));
     let layoutChanged = true, driveShow = null, conflict = null;
     if (layout) {
-      try { driveShow = Show.normalise(JSON.parse((await (await this.get('files/' + layout.id, { alt: 'media' })).text()).replace(/^\uFEFF/, ''))); } catch (e) {}
-      if (driveShow) layoutChanged = JSON.stringify(driveShow) !== JSON.stringify(show);
-      // someone published since this device last got (or sent) the layout: say so before replacing it
-      const last = settings.driveLayout;
+      try { driveShow = tidy(await this.readJson(layout)); } catch (e) {}
+      if (driveShow) layoutChanged = JSON.stringify(driveShow) !== JSON.stringify(tidy(make()));
+      // someone published since this device last got (or sent) it: say so before replacing it
+      const last = isBase ? settings.driveLayout : (settings.drivePacks || {})[target];
       if (layoutChanged && !(last && last.id === layout.id && last.modifiedTime === layout.modifiedTime)) {
         let who = null;
         try { who = (await (await this.get('files/' + layout.id, { fields: 'lastModifyingUser(displayName,emailAddress,me)' })).json()).lastModifyingUser || null; } catch (e) {}
@@ -2160,7 +2348,7 @@ const Drive = {
       }
     }
     if (uploads.length) layoutChanged = true; // the songs' new places go into the layout
-    this.pub = { root, folder, layout, songsRoot, folders, uploads, layoutChanged, driveShow, conflict };
+    this.pub = { target, team, root, folder, layout, songsRoot, folders, uploads, layoutChanged, driveShow, conflict, make };
     return this.pub;
   },
 
@@ -2168,6 +2356,7 @@ const Drive = {
     const P = this.pub;
     if (!P || this.busy) return '';
     this.busy = true; this.stopped = false;
+    const isBase = P.target === 'base';
     const gb = n => n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB';
     const total = P.uploads.reduce((n, u) => n + u.size, 0);
     let done = 0, bytes = 0, failed = 0, lastErr = null;
@@ -2205,38 +2394,57 @@ const Drive = {
       if (failed || this.stopped) {
         UI.renderAll();
         const why = lastErr?.message === 'drive:signin' ? ' Your Google sign-in ran out.' : '';
-        return `${done - failed} of ${P.uploads.length} songs uploaded.${why} The layout wasn't published yet, so volunteers won't see half a change. Tap Publish to Drive again to finish.`;
+        return `${done - failed} of ${P.uploads.length} songs uploaded.${why} The layout wasn't published yet, so volunteers won't see half a change. Tap Publish again to finish.`;
       }
       let published = '';
       if (P.layoutChanged || !P.layout) {
         say('Publishing the layout…');
-        const blob = new Blob([JSON.stringify(show)], { type: 'application/json' });
+        const payload = P.make();
+        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
         let r;
         if (P.layout) r = await this.replace(P.layout.id, blob, 'application/json');
         else {
-          const c = await (await this.send('POST', this.url('files', { fields: 'id' }), JSON.stringify({ name: 'Hockey-Game-Day.rinkside.json', parents: [P.root], mimeType: 'application/json' }),
+          const name = isBase ? 'Hockey-Game-Day.rinkside.json' : `${(P.team.full || P.team.name).replace(/[^\w .-]+/g, '').trim() || 'Team'}.rinkside-team.json`;
+          const c = await (await this.send('POST', this.url('files', { fields: 'id' }), JSON.stringify({ name, parents: [P.root], mimeType: 'application/json' }),
             { 'Content-Type': 'application/json; charset=UTF-8' })).json();
           r = await this.replace(c.id, blob, 'application/json');
         }
-        settings.driveLayout = { id: r.id, name: r.name, modifiedTime: r.modifiedTime };
+        const meta = { id: r.id, name: r.name, modifiedTime: r.modifiedTime };
+        if (isBase) { settings.driveLayout = meta; Packs.base = payload; }
+        else { settings.drivePacks = { ...(settings.drivePacks || {}), [P.target]: meta }; Packs.packs = { ...Packs.packs, [P.target]: Packs.normalisePack(Packs.clone(payload), P.target) }; }
         settings.localEdits = false;
         Prefs.save();
-        await Store.put('kv', 'driveBase', show).catch(() => {});
+        await Packs.save();
         await Redo.clear();
-        published = `Layout published (${r.name}).`;
+        published = isBase ? `Layout published (${r.name}).` : `${P.team.full} published.`;
       }
       UI.renderAll();
       const parts = [];
       if (published) parts.push(published);
       if (P.uploads.length) parts.push(`${P.uploads.length} song${P.uploads.length === 1 ? '' : 's'} uploaded.`);
-      parts.push(published || P.uploads.length ? 'Volunteers get it the next time they tap Check for updates.' : 'Drive already matches this device.');
+      parts.push(published || P.uploads.length ? (isBase ? 'Volunteers get it the next time they tap Check for updates.' : `${P.team.name} volunteers get it the next time they tap Check for updates.`) : 'Drive already matches this device.');
       return parts.join(' ');
     } finally {
       this.busy = false;
       this.pub = null;
-      // the publish sign-in can change everything in the organizer's Drive: don't keep it around
+      // the publish sign-in can change everything in the person's Drive: don't keep it around
       if (Auth.canWrite()) Auth.forget();
     }
+  },
+
+  // Start over: the layout from Drive (shared library + this device's team packs)
+  async fetchCurrent() {
+    const base = await this.fetchLayout();
+    const files = await this.listAll(false);
+    const cfgFile = files.find(f => !f.path.includes('/') && f.name === Packs.FILE);
+    let cfg = Packs.cfg;
+    if (cfgFile) { try { cfg = Packs.normaliseCfg(await this.readJson(cfgFile)); } catch (e) {} }
+    const packs = {}, metas = {};
+    for (const t of await this.teamFolders(cfg)) {
+      if (!t.pack) continue;
+      try { packs[t.team] = Packs.normalisePack(await this.readJson(t.pack), t.team); metas[t.team] = { id: t.pack.id, name: t.pack.name, modifiedTime: t.pack.modifiedTime }; } catch (e) {}
+    }
+    return { ...base, cfg, packs, metas };
   },
 
   async run(opts, say, meter) {
@@ -2258,9 +2466,18 @@ const Drive = {
 
       // the layout first: it's small, and it's the part people notice
       let newShow = null;
-      if (opts.layout && plan.layout) {
+      if (opts.layout && plan.layoutNew) {
         say('Reading the layout…');
-        newShow = plan.layoutShow || Show.normalise(JSON.parse((await plan.layout.load()).replace(/^\uFEFF/, '')));
+        let base = Packs.base;
+        if (plan.baseNew || !base) base = plan.layout ? Show.normalise(JSON.parse((await plan.layout.load()).replace(/^\uFEFF/, ''))) : Packs.splitBase(show);
+        const packs = { ...Packs.packs }, metas = { ...(settings.drivePacks || {}) };
+        for (const p of plan.packsNew) {
+          try { packs[p.team] = Packs.normalisePack(await this.readJson(p.file), p.team); metas[p.team] = { id: p.file.id, name: p.file.name, modifiedTime: p.file.modifiedTime }; }
+          catch (e) { console.error('team pack', p.team, e); }
+        }
+        for (const id of plan.packsGone) { delete packs[id]; delete metas[id]; }
+        newShow = Packs.merge(base, packs);
+        plan._apply = () => { Packs.base = base; Packs.packs = packs; settings.drivePacks = metas; return Packs.save(); };
       }
 
       const manifest = (await Store.get('kv', 'driveManifest')) || {};
@@ -2303,17 +2520,17 @@ const Drive = {
       if (newShow) {
         setShow(newShow);
         await Store.put('kv', 'show', show).catch(() => {});
-        settings.driveLayout = { id: plan.layout.id || '', name: plan.layout.name, modifiedTime: plan.layout.modifiedTime };
+        if (plan.layout && (plan.baseNew || !settings.driveLayout)) settings.driveLayout = { id: plan.layout.id || '', name: plan.layout.name, modifiedTime: plan.layout.modifiedTime };
         settings.localEdits = false;
+        await plan._apply();
         Prefs.save();
-        await Store.put('kv', 'driveBase', show).catch(() => {});
       }
       UI.renderAll();
 
       const got = done - failed;
       const again = plan.source === 'drive' ? 'Tap Check for updates' : 'Open the same download again';
       const parts = [];
-      if (newShow) parts.push(`Layout updated (${plan.layout.name}).`);
+      if (newShow) parts.push(`Layout updated${plan.packsNew.length ? ` (with ${plan.packsNew.map(p => p.name).join(', ')})` : ''}.`);
       if (got) parts.push(`${got} song${got === 1 ? '' : 's'} ${plan.source === 'drive' ? 'downloaded' : 'added'}.`);
       if (pruned) parts.push(`${pruned} old song${pruned === 1 ? '' : 's'} removed.`);
       const left = jobs.length + failed;
@@ -2335,6 +2552,8 @@ const Drive = {
     const m = String(err && err.message || err || '');
     if (m === 'drive:signin') return 'Sign in with Google to continue.';
     if (m === 'drive:needwrite') return 'Publishing needs your Google permission to change files in Drive.';
+    if (m === 'drive:noteditor-team') return 'This Google account can view the team\'s folder but not change it. Ask the team to share its folder with you as an Editor.';
+    if (m === 'drive:noteamfolder') return 'This team doesn\'t have its own Drive folder yet. The organizer adds it in Settings › Admin.';
     if (m === 'drive:noteditor') return 'This Google account can view the team folder but not change it. Only the organizer (an Editor of the folder) can publish.';
     if (m === 'drive:nolayout') return 'There\'s no layout file (.rinkside.json) in the team\'s Drive folder yet.';
     if (m === 'drive:upload') return 'Google Drive didn\'t accept the upload. Try again.';
@@ -2400,7 +2619,7 @@ const Redo = {
   render() {
     const box = $('#redoBox');
     if (!box) return;
-    box.hidden = !this.items.length || !settings.driveEditor;
+    box.hidden = !this.items.length || !Perm.any();
     $('#redoSum').textContent = `${this.items.length} change${this.items.length === 1 ? '' : 's'} to make again`;
     $('#redoList').innerHTML = this.items.map(x => `<li>${esc(x)}</li>`).join('');
   },
@@ -2511,6 +2730,13 @@ const Settings = {
     $('#resetShow').addEventListener('click', e => {
       Edit.armed(e.currentTarget, 'Tap again to replace the layout on this device', () => this.resetLayout());
     });
+    $('#followList').addEventListener('change', () => {
+      const ids = [...document.querySelectorAll('#followList [data-follow]:checked')].map(x => x.dataset.follow);
+      settings.follow = ids.length ? ids : null; Prefs.save();
+      if (!Teams.list().some(t => t.id === settings.team)) { settings.team = Teams.list()[0]?.id; Prefs.save(); }
+      Teams.apply(); UI.renderAll(); this.render();
+    });
+    $('#adminOpen').addEventListener('click', () => Admin.open());
     $('#teamList').addEventListener('click', e => {
       const b = e.target.closest('[data-edit-team]');
       if (b) { $('#settings').close(); Edit.team(show.teams.find(t => t.id === b.dataset.editTeam)); }
@@ -2548,6 +2774,7 @@ const Settings = {
     };
     const busy = on => {
       $('#driveCheck').disabled = on; $('#drivePublish').disabled = on; $('#resetShow').disabled = on;
+      document.querySelectorAll('#pubTeams button').forEach(b => { b.disabled = on; });
       if (on) { $('#driveCheck').dataset.label = $('#driveCheck').textContent; $('#driveCheck').textContent = 'Working…'; }
       else if ($('#driveCheck').dataset.label) { $('#driveCheck').textContent = $('#driveCheck').dataset.label; delete $('#driveCheck').dataset.label; }
       $('#driveMeter').hidden = !on; $('#driveStopRow').hidden = !on;
@@ -2602,48 +2829,61 @@ const Settings = {
       finally { busy(false); }
       this.renderDrive();
     };
-    // Organizer: publish this device's layout and new songs to Drive
-    $('#drivePublish').addEventListener('click', async () => {
+    // Publish: the shared library (organizer) or a team (its music volunteer)
+    const packShow = p => ({ tabs: p.tabs, teams: [p.team], gameday: { situations: [], moments: [], endings: [] } });
+    const startPublish = async target => {
       if (Drive.busy) return;
       $('#pubPlan').hidden = true; $('#drivePlan').hidden = true;
       busy(true); $('#driveStopRow').hidden = true;
       try {
-        const P = await Drive.publishPlan(say);
+        const P = await Drive.publishPlan(say, target);
+        const isBase = target === 'base';
+        const what = isBase ? 'layout' : `${P.team.full} team settings`;
         const n = P.uploads.length, bytes = P.uploads.reduce((t, u) => t + u.size, 0);
         if (!n && !P.layoutChanged) { say('Drive already matches this device. Nothing to publish.'); return; }
         if (P.conflict) {
-          const base = await Store.get('kv', 'driveBase').catch(() => null);
-          const mine = Diff.list(base || P.driveShow, show);
+          const before = isBase ? (Packs.base || P.driveShow) : (Packs.packs[target] ? packShow(Packs.packs[target]) : (P.driveShow && packShow(P.driveShow)));
+          const mine = Diff.list(before, isBase ? Packs.splitBase(show) : packShow(Packs.splitPack(target)));
           const who = P.conflict.who?.me ? 'you (from another device)' : esc(P.conflict.who?.displayName || P.conflict.who?.emailAddress || 'someone else');
           const at = d => new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
           say(''); busy(false);
           const choice = await Ask.choose({
             title: 'Someone published since your last update',
-            text: `The layout in Drive was published by <b>${who}</b> on ${at(P.conflict.when)}${P.conflict.last ? ', after this device last got it' : ', and this device doesn\'t have that version yet'}. Publishing now would replace those changes for everyone.`
-              + `<br><br><b>Get latest first</b> puts Drive's layout on this device. Your changes here are replaced, but they're listed under Publish to Drive so you can make them again, then publish.`
-              + `<br><br><b>Publish anyway</b> replaces Drive's layout with yours. Drive keeps the old one in its version history.`,
+            text: `The ${esc(what)} in Drive ${isBase ? 'was' : 'were'} published by <b>${who}</b> on ${at(P.conflict.when)}${P.conflict.last ? ', after this device last got them' : ', and this device doesn\'t have that version yet'}. Publishing now would replace those changes.`
+              + `<br><br><b>Get latest first</b> puts Drive's version on this device. Your changes here are replaced, but they're listed under Publish so you can make them again, then publish.`
+              + `<br><br><b>Publish anyway</b> replaces Drive's version with yours. Drive keeps the old one in its version history.`,
             list: mine, listLabel: mine.length ? `See your ${mine.length} change${mine.length === 1 ? '' : 's'} on this device` : '',
             buttons: [{ label: 'Get latest first', value: 'latest', primary: true }, { label: 'Publish anyway', value: 'anyway' }, { label: 'Cancel', value: 'cancel' }],
           });
           if (choice === 'cancel') { Drive.pub = null; say('Nothing was published.'); return; }
           if (choice === 'latest') {
             Drive.pub = null;
-            if (!P.driveShow) { say('Drive\'s layout couldn\'t be read. Tap Check for updates to get it, then publish.'); return; }
+            if (!P.driveShow) { say('Drive\'s version couldn\'t be read. Tap Check for updates to get it, then publish.'); return; }
             await Store.put('kv', 'showBackup', show).catch(() => {}); // just in case
             await Redo.save(mine);
-            setShow(P.driveShow);
+            const meta = { id: P.layout.id, name: P.layout.name, modifiedTime: P.layout.modifiedTime };
+            if (isBase) {
+              const packs = { ...Packs.packs };
+              for (const t of show.teams) if (Perm.team(t.id) || packs[t.id]) packs[t.id] = Packs.splitPack(t.id); // keep this device's team work
+              Packs.base = P.driveShow; settings.driveLayout = meta;
+              setShow(Packs.merge(Packs.base, packs));
+            } else {
+              const base = Packs.splitBase(show);
+              Packs.packs = { ...Packs.packs, [target]: P.driveShow };
+              settings.drivePacks = { ...(settings.drivePacks || {}), [target]: meta };
+              setShow(Packs.merge(base, Packs.packs));
+            }
+            await Packs.save();
             await Store.put('kv', 'show', show).catch(() => {});
-            await Store.put('kv', 'driveBase', show).catch(() => {});
-            settings.driveLayout = { id: P.layout.id, name: P.layout.name, modifiedTime: P.layout.modifiedTime };
             settings.localEdits = false; Prefs.save();
             this.render();
-            say(`This device now has the latest layout from Drive.${mine.length ? ' Make your changes again (listed above), then tap Publish to Drive.' : ''}`);
+            say(`This device now has the latest version from Drive.${mine.length ? ' Make your changes again (listed above), then publish.' : ''}`);
             if (mine.length) { $('#redoBox').open = true; $('#redoBox').scrollIntoView({ block: 'center' }); }
             return;
           }
         }
         const lines = [];
-        if (P.layoutChanged) lines.push(P.layout ? `Publish this device's layout, replacing ${P.layout.name} in “${P.folder.name}”. Drive keeps the old version in its version history.` : `Publish this device's layout as a new file in “${P.folder.name}”.`);
+        if (P.layoutChanged) lines.push(P.layout ? `Publish this device's ${what}, replacing ${P.layout.name} in “${P.folder.name}”. Drive keeps the old version in its version history.` : `Publish this device's ${what} as a new file in “${P.folder.name}”.`);
         if (n) {
           const list = P.uploads.slice(0, 6).map(u => `${u.folderName}/${u.name}`).join(', ');
           lines.push(`Upload ${n} song${n === 1 ? '' : 's'} (${gb(bytes)}): ${list}${n > 6 ? `, and ${n - 6} more` : ''}.`);
@@ -2655,11 +2895,14 @@ const Settings = {
       } catch (err) {
         if (['drive:needwrite', 'drive:signin'].includes(err.message) && Auth.enabled()) {
           if (!Auth.canRedirect()) { say(Drive.explain('drive:nosignin')); return; }
-          say('Opening Google sign-in…'); Auth.signIn('publish', false, DRIVE.writeScope); return;
+          say('Opening Google sign-in…'); Auth.signIn(target === 'base' ? 'publish' : 'publish:' + target, false, DRIVE.writeScope); return;
         }
         console.error(err); say(Drive.explain(err));
       } finally { busy(false); }
-    });
+    };
+    this.startPublish = startPublish;
+    $('#drivePublish').addEventListener('click', () => startPublish('base'));
+    $('#pubTeams').addEventListener('click', e => { const b = e.target.closest('[data-publish]'); if (b) startPublish(b.dataset.publish); });
     $('#pubNo').addEventListener('click', () => { $('#pubPlan').hidden = true; Drive.pub = null; });
     $('#pubGo').addEventListener('click', async () => {
       $('#pubPlan').hidden = true;
@@ -2726,7 +2969,11 @@ const Settings = {
     $('#storageWarn').hidden = !!Store.db;
     this.renderDrive();
     renderAbout();
-    $('#teamList').innerHTML = show.teams.map(t => `<div class="team-line">${Teams.badge(t)}<b>${esc(t.full)}</b><button class="mini" data-edit-team="${esc(t.id)}">${ICONS.pen}Edit</button></div>`).join('');
+    $('#teamList').innerHTML = Teams.list().map(t => `<div class="team-line">${Teams.badge(t)}<b>${esc(t.full)}<small>${Packs.packs[t.id] ? 'Team settings from its own folder' : 'Uses the shared library'}</small></b>${Perm.teamSettings(t) ? `<button class="mini" data-edit-team="${esc(t.id)}">${ICONS.pen}Edit</button>` : ''}</div>`).join('');
+    // which teams this device shows (organizers always see every team)
+    const shown = new Set(Teams.list().map(t => t.id));
+    $('#followWrap').hidden = Perm.admin() || show.teams.length < 2;
+    $('#followList').innerHTML = show.teams.map(t => `<label class="setting"><span>${Teams.badge(t)} ${esc(t.full)}</span><input type="checkbox" data-follow="${esc(t.id)}"${shown.has(t.id) ? ' checked' : ''}></label>`).join('');
     try {
       const est = await navigator.storage?.estimate?.();
       if (est) $('#storageInfo').textContent = `Using ${(est.usage / 1e9).toFixed(2)} GB of about ${(est.quota / 1e9).toFixed(0)} GB available to this app.`;
@@ -2740,26 +2987,155 @@ const Settings = {
     if (Drive.busy) return;
     const b = $('#resetShow'); b.disabled = true;
     try {
-      let s = null, from = null, why = '';
+      let s = null, from = null, why = '', saved = false;
       if (Drive.ready() && Auth.token() && navigator.onLine !== false) {
         say('Getting the layout from Google Drive…');
-        try { ({ show: s, layout: from } = await Drive.fetchLayout()); }
-        catch (err) { console.error(err); why = Drive.explain(err); }
+        try {
+          const cur = await Drive.fetchCurrent();
+          from = cur.layout;
+          Packs.cfg = cur.cfg; Packs.base = cur.show; Packs.packs = cur.packs;
+          settings.drivePacks = cur.metas;
+          await Packs.save();
+          s = Packs.merge(Packs.base, Packs.packs);
+        } catch (err) { console.error(err); why = Drive.explain(err); }
       } else why = navigator.onLine === false ? 'There\'s no internet connection.' : 'You\'re not signed in to Google on this device.';
+      if (!s && Packs.base) { s = Packs.merge(Packs.base, Packs.packs); saved = true; } // the copy from the last Check for updates
       if (!s) {
         s = await builtInShow();
         if (!s) { say(`${why} Tap Check for updates on wifi to get the layout from Drive.`); return; }
       }
       setShow(s);
       await Store.put('kv', 'show', show).catch(() => {});
-      settings.driveLayout = from ? { id: from.id, name: from.name, modifiedTime: from.modifiedTime } : null;
+      if (from) settings.driveLayout = { id: from.id, name: from.name, modifiedTime: from.modifiedTime };
+      else if (!saved) settings.driveLayout = null;
       settings.localEdits = false; Prefs.save();
-      if (from) await Store.put('kv', 'driveBase', show).catch(() => {});
       this.render();
       say(from ? `Done. This device now has the Drive layout (${from.name}). Your music is still here.`
+        : saved ? `${why} The layout from your last Check for updates was used. Tap Check for updates on wifi to get anything newer.`
         : `${why} The layout built into the app was used instead (Drive's layout as of version ${APP_VERSION}). Tap Check for updates on wifi to get anything newer.`);
       UI.toast('Layout reset.');
     } finally { b.disabled = false; }
+  },
+};
+
+/* Admin (organizers only): the teams, the Drive folder each one keeps, whether Rinkside can see
+   it and whether its music volunteer has published, and who the shared library is shared with.
+   Saving writes Rinkside-Teams.json into the shared folder; phones read it on Check for updates.
+   Google Cloud's list of approved test users can't be read by the app, so it's a reminder. */
+const Admin = {
+  PENDING: 'rinkside.pendingTeams',
+  open(resumeSave = false) {
+    this.render();
+    if (!$('#admin').open) $('#admin').showModal();
+    if (resumeSave) {
+      let cfg = null;
+      try { cfg = JSON.parse(localStorage.getItem(this.PENDING) || 'null'); localStorage.removeItem(this.PENDING); } catch (e) {}
+      if (cfg) this.save(cfg);
+    } else if (Auth.token()) this.check();
+  },
+  say(m) { $('#adminProgress').textContent = m; },
+  link: id => (id ? `https://drive.google.com/drive/folders/${id}` : ''),
+  render() {
+    $('#adminTeams').innerHTML = show.teams.map(t => `<div class="admin-team" data-team="${esc(t.id)}">
+      <div class="admin-team-head">${Teams.badge(t)}<b>${esc(t.full)}</b></div>
+      <label class="field">Team's Drive folder link<input type="url" data-folder value="${esc(this.link(Packs.folderOf(t.id)))}" placeholder="None: uses the shared library" autocomplete="off" spellcheck="false"></label>
+      <p class="hint admin-status" data-status>${Packs.folderOf(t.id) ? 'Tap Check teams and access to see how this folder is set up.' : 'No folder yet: this team uses the shared library, and you look after its goal horn and playlists.'}</p>
+    </div>`).join('');
+  },
+  async check() {
+    if (!Auth.token()) { if (!Auth.canRedirect()) { this.say(Drive.explain('drive:nosignin')); return; } this.say('Opening Google sign-in…'); Auth.signIn('admin'); return; }
+    const b = $('#adminCheck'); b.disabled = true;
+    const date = d => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    try {
+      this.say('Checking the shared library…');
+      const P = 'permissions(emailAddress,role,displayName,type)';
+      const base = await (await Drive.get('files/' + Drive.folderId(), { fields: `id,name,${P}` })).json();
+      const perms = (base.permissions || []);
+      const by = role => perms.filter(p => p.role === role && p.type !== 'anyone').map(p => esc(p.displayName ? `${p.displayName} (${p.emailAddress || ''})` : p.emailAddress || p.type));
+      const anyone = perms.some(p => p.type === 'anyone' || p.type === 'domain');
+      $('#adminAccess').innerHTML = perms.length ? `
+        ${anyone ? '<p class="warn-text"><b>Anyone with the link</b> can open this folder. In Drive, set General access back to Restricted.</p>' : ''}
+        <p><b>Owner:</b> ${by('owner').join(', ') || 'you'}</p>
+        <p><b>Editors (can publish the shared library): ${by('writer').length + by('organizer').length + by('fileOrganizer').length}</b><br>${[...by('writer'), ...by('organizer'), ...by('fileOrganizer')].join('<br>') || 'None'}</p>
+        <p><b>Viewers (can download): ${by('reader').length + by('commenter').length}</b><br>${[...by('reader'), ...by('commenter')].join('<br>') || 'None'}</p>`
+        : '<p class="hint">Google didn\'t share the access list with this account. Only the folder\'s owner can see it.</p>';
+      for (const row of document.querySelectorAll('#adminTeams .admin-team')) {
+        const st = row.querySelector('[data-status]');
+        const id = (row.querySelector('[data-folder]').value.match(/folders\/([\w-]{10,})/) || row.querySelector('[data-folder]').value.match(/^([\w-]{10,})$/) || [])[1];
+        if (!id) { st.textContent = 'No folder yet: this team uses the shared library, and you look after its goal horn and playlists.'; continue; }
+        this.say(`Checking ${row.querySelector('b').textContent}…`);
+        let tf;
+        try { tf = await (await Drive.get('files/' + id, { fields: `id,name,owners(displayName,emailAddress),${P}` })).json(); }
+        catch (e) {
+          st.innerHTML = /drive:(403|404)/.test(e.message)
+            ? '<span class="warn-text">Rinkside can\'t see this folder. Ask the team to share it with your Google account (Viewer), and check the link.</span>'
+            : esc(Drive.explain(e));
+          continue;
+        }
+        const owner = (tf.owners || [])[0];
+        const editors = (tf.permissions || []).filter(p => p.role === 'writer').map(p => p.displayName || p.emailAddress);
+        let pack = null, songs = 0;
+        try {
+          const files = await Drive.listAll(false, id);
+          songs = files.filter(f => AUDIO_EXT.test(f.name)).length;
+          pack = Drive.pickPack(files);
+        } catch (e) {}
+        let who = '';
+        if (pack) { try { who = (await (await Drive.get('files/' + pack.id, { fields: 'lastModifyingUser(displayName)' })).json()).lastModifyingUser?.displayName || ''; } catch (e) {} }
+        st.innerHTML = `Folder “${esc(tf.name)}”${owner ? `, owned by ${esc(owner.displayName || owner.emailAddress)}` : ''}. ${songs} song${songs === 1 ? '' : 's'}.`
+          + (editors.length ? `<br>Music volunteer${editors.length === 1 ? '' : 's'} (Editors): ${editors.map(esc).join(', ')}.` : '')
+          + `<br>${pack ? `Team settings published ${date(pack.modifiedTime)}${who ? ` by ${esc(who)}` : ''}.` : 'No team settings yet: until the music volunteer taps <b>Publish</b> in Rinkside, the team uses its settings in the shared library.'}`;
+      }
+      this.say('');
+    } catch (e) { console.error(e); this.say(Drive.explain(e)); }
+    finally { b.disabled = false; }
+  },
+  collect() {
+    const teams = [];
+    for (const row of document.querySelectorAll('#adminTeams .admin-team')) {
+      const v = row.querySelector('[data-folder]').value.trim();
+      const id = (v.match(/folders\/([\w-]{10,})/) || v.match(/[?&]id=([\w-]{10,})/) || v.match(/^([\w-]{10,})$/) || [])[1];
+      if (v && !id) return { error: `That doesn't look like a Drive folder link: ${v}` };
+      const t = show.teams.find(x => x.id === row.dataset.team);
+      if (id) teams.push({ id: t.id, name: t.full, folder: id });
+    }
+    return { format: 'rinkside-teams', version: 1, teams };
+  },
+  async save(pending) {
+    const cfg = pending || this.collect();
+    if (cfg.error) { this.say(cfg.error); return; }
+    if (!Auth.token() || !Auth.canWrite()) {
+      if (!Auth.canRedirect()) { this.say(Drive.explain('drive:nosignin')); return; }
+      try { localStorage.setItem(this.PENDING, JSON.stringify(cfg)); } catch (e) {}
+      this.say('Opening Google sign-in (saving needs permission to change files in Drive)…');
+      Auth.signIn('admin-save', false, DRIVE.writeScope); return;
+    }
+    const b = $('#adminSave'); b.disabled = true;
+    try {
+      this.say('Saving the team list…');
+      const j = await (await Drive.get('files', { q: `'${Drive.folderId()}' in parents and trashed = false and name = '${Packs.FILE}'`, includeItemsFromAllDrives: 'true', fields: 'files(id,name)' })).json();
+      const blob = new Blob([JSON.stringify(cfg, null, 1)], { type: 'application/json' });
+      const f = (j.files || [])[0];
+      if (f) await Drive.replace(f.id, blob, 'application/json');
+      else {
+        const c = await (await Drive.send('POST', Drive.url('files', { fields: 'id' }), JSON.stringify({ name: Packs.FILE, parents: [Drive.folderId()], mimeType: 'application/json' }), { 'Content-Type': 'application/json; charset=UTF-8' })).json();
+        await Drive.replace(c.id, blob, 'application/json');
+      }
+      Packs.cfg = cfg; await Packs.save();
+      applyRole(); this.render();
+      this.say(`Saved: ${cfg.teams.length} team folder${cfg.teams.length === 1 ? '' : 's'}. Phones pick them up the next time they tap Check for updates.`);
+    } catch (e) { console.error(e); this.say(Drive.explain(e)); }
+    finally { b.disabled = false; if (Auth.canWrite()) Auth.forget(); }
+  },
+  init() {
+    $('#adminClose').addEventListener('click', () => $('#admin').close());
+    $('#adminCheck').addEventListener('click', () => this.check());
+    $('#adminSave').addEventListener('click', () => this.save());
+    $('#adminAddTeam').addEventListener('click', () => {
+      $('#admin').close(); $('#settings').close();
+      Edit.toggle(true); Edit.team(Teams.current); setTimeout(() => $('[data-act="teamAdd"]')?.click(), 0);
+      UI.toast('Name the new team, then publish the shared library. Add its folder link in Admin when it has one.', 6000);
+    });
   },
 };
 
@@ -2768,7 +3144,17 @@ const Settings = {
 function applyRole() {
   // Everyone can edit their own copy; only Editors of the Drive folder can publish it for everyone.
   const pub = $('#publishBox');
-  if (pub) pub.hidden = !(Auth.enabled() && settings.driveEditor && Auth.canRedirect());
+  const mineTeams = show ? show.teams.filter(t => Perm.team(t.id) && Packs.folderOf(t.id)) : [];
+  if (pub) {
+    pub.hidden = !(Auth.enabled() && Auth.canRedirect() && (settings.driveEditor || mineTeams.length));
+    $('#drivePublish').hidden = !settings.driveEditor;
+    $('#pubTeams').innerHTML = mineTeams.map(t => `<button class="btn" data-publish="${esc(t.id)}">Publish ${esc(t.name)}</button>`).join('');
+  }
+  // Edit: organizers and team music volunteers (3.1: no more changes that stay on one device)
+  const eb = $('#editBtn');
+  if (eb) { eb.hidden = !Perm.any(); if (eb.hidden && typeof Edit !== 'undefined' && Edit.on) Edit.toggle(false); }
+  const ar = $('#adminRow');
+  if (ar) ar.hidden = !settings.driveEditor;
   // layout files, show packs and the Drive connection: only for people who can edit the Drive folder
   const adv = $('#advanced');
   if (adv) { adv.hidden = !settings.driveEditor; if (adv.hidden) adv.open = false; }
@@ -2814,10 +3200,12 @@ async function boot() {
   UI.init();
   Edit.init();
   Settings.init();
+  Admin.init();
   applyRole();
   $('#help').addEventListener('click', e => { if (e.target.closest('[data-close-help]')) $('#help').close(); });
   await Store.open();
   await Library.load();
+  await Packs.load();
   Redo.load();
   let s = null;
   try { const saved = await Store.get('kv', 'show'); if (saved) s = Show.normalise(saved); } catch (e) {}
@@ -2834,6 +3222,9 @@ async function boot() {
       $('#driveSection').scrollIntoView({ block: 'start' });
       if (signin.ok && signin.resume === 'check') $('#driveCheck').click();
       else if (signin.ok && signin.resume === 'publish') $('#drivePublish').click();
+      else if (signin.ok && String(signin.resume).startsWith('publish:')) Settings.startPublish(signin.resume.slice(8));
+      else if (signin.ok && signin.resume === 'admin-save') Admin.open(true);
+      else if (signin.ok && signin.resume === 'admin') Admin.open();
       else $('#driveProgress').textContent = signin.error === 'access_denied'
         ? 'Google sign-in was cancelled. Tap the button to try again.'
         : 'Google sign-in didn\'t finish. Tap the button to try again.';

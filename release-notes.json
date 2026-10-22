@@ -1,5 +1,31 @@
 [
   {
+    "version": "3.1.0",
+    "date": "2026-10-22",
+    "notes": [
+      {
+        "type": "new",
+        "text": "Teams can keep their own Google Drive folder with their own goal horn, intro, game music, tabs and songs. Everything else comes from the shared library."
+      },
+      {
+        "type": "new",
+        "text": "The team button at the top lists only your teams. Change which teams show in Settings › Teams on this device."
+      },
+      {
+        "type": "improved",
+        "text": "Edit is for the organizer and each team's music volunteer, so every phone on a team plays the same thing. Everyone else gets changes with Check for updates."
+      },
+      {
+        "type": "new",
+        "text": "Team music volunteers: Publish your team sends your changes to everyone on your team, and you can hide shared tabs your team doesn't use."
+      },
+      {
+        "type": "new",
+        "text": "Organizers: Settings › Admin shows every team, its Drive folder, its music volunteers and who the shared library is shared with."
+      }
+    ]
+  },
+  {
     "version": "3.0.0",
     "date": "2026-10-21",
     "notes": [

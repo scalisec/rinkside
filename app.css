@@ -640,3 +640,16 @@ ul.rn li { display: flex; gap: 8px; align-items: baseline; }
 
 /* empty status lines take no room (3.0) */
 .progress:empty, #driveLast:empty { margin: 0; padding: 0; min-height: 0; }
+
+/* 3.1: teams, permissions, Admin */
+.row-inline { display: contents; }
+.tab.is-hidden { opacity: .45; text-decoration: line-through; }
+.lock-note { margin: -4px 0 10px; }
+.team-line small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+.follow { margin: 8px 0 4px; }
+.follow summary { cursor: pointer; color: var(--muted); }
+.follow .setting span { display: inline-flex; align-items: center; gap: 8px; }
+.admin-team { border: 1px solid var(--line, rgba(255,255,255,.12)); border-radius: 12px; padding: 10px 12px; margin: 10px 0; }
+.admin-team-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.admin-status { margin: 6px 0 0; }
+.admin-access p { margin: 6px 0; font-size: 14px; }
