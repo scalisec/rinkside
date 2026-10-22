@@ -1,7 +1,7 @@
 {
-  "name": "Rinkside Soundboard",
+  "name": "Rinkside DJ",
   "short_name": "Rinkside",
-  "description": "Game-day soundboard for hockey",
+  "description": "Game-day music and sound effects for youth hockey",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

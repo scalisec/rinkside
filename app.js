@@ -1,4 +1,4 @@
-/* Rinkside Soundboard
+/* Rinkside DJ (formerly Rinkside Soundboard)
  * A touch-first game-day soundboard for hockey. Runs in Chrome on a tablet,
  * phone or PC. No server, no accounts, no libraries.
  *
@@ -48,7 +48,7 @@ const DEFAULTS = {
   follow: null,            // 3.1: teams shown on this device (null: decided by Drive access)
 };
 
-const APP_VERSION = '3.1.0';
+const APP_VERSION = '3.1.1';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -3164,7 +3164,7 @@ function applyRole() {
   Redo.render();
 }
 
-// "Rinkside Soundboard v2.0 · Layout: Hockey-Game-Day.rinkside.json (Oct 6, 2026)": tells you over the phone what a tablet has
+// "Rinkside DJ v3.1.1 · Layout: Hockey-Game-Day.rinkside.json (Oct 6, 2026)": tells you over the phone what a tablet has
 function versionText() {
   const B = window.RINKSIDE_BUILD || {};
   const copy = document.getElementById('default-show') ? 'old single-file copy' : 'web app';
@@ -3174,7 +3174,7 @@ function renderAbout() {
   const L = settings.driveLayout;
   const layout = L ? `${L.name} (${new Date(L.modifiedTime).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })})` : show.name;
   document.querySelectorAll('[data-version]').forEach(el => { el.textContent = versionText(); });
-  document.querySelectorAll('[data-about]').forEach(el => { el.textContent = `Rinkside Soundboard ${versionText()} · Layout: ${layout}`; });
+  document.querySelectorAll('[data-about]').forEach(el => { el.textContent = `Rinkside DJ ${versionText()} · Layout: ${layout}`; });
 }
 
 async function builtInShow() {

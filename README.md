@@ -1,4 +1,4 @@
-# Rinkside Soundboard
+# Rinkside DJ (formerly Rinkside Soundboard)
 
 A game-day soundboard for hockey: goal horns, penalty songs, playlists and
 announcements, built for an Android tablet (a phone works as a backup).
