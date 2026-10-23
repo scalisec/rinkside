@@ -1,5 +1,23 @@
 [
   {
+    "version": "3.2.0",
+    "date": "2026-10-23",
+    "notes": [
+      {
+        "type": "new",
+        "text": "Ready-made teams: Burlington Bulldogs, Burlington Barracudas and Burlington Eagles come with their goal horn, intro and game music already set. A new team can pick one and start right away."
+      },
+      {
+        "type": "improved",
+        "text": "The team button only lists the teams your Google account has access to. Tap Check for updates once if your list looks wrong."
+      },
+      {
+        "type": "improved",
+        "text": "Goal horn names no longer say \"Our\" or \"Second Team\"."
+      }
+    ]
+  },
+  {
     "version": "3.1.2",
     "date": "2026-10-22",
     "notes": [

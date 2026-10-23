@@ -48,7 +48,7 @@ const DEFAULTS = {
   follow: null,            // 3.1: teams shown on this device (null: decided by Drive access)
 };
 
-const APP_VERSION = '3.1.2';
+const APP_VERSION = '3.2.0';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -642,16 +642,23 @@ const Perm = {
 
 const Teams = {
   get current() { const l = this.list(); return l.find(t => t.id === settings.team) || l[0] || show.teams[0]; },
-  // the teams in the dropdown: organizers see every team; others the teams on this device
-  list() {
+  /* 3.2: the teams this phone may show. Organizers: every team. Everyone else: the teams whose
+     own Drive folder their Google account can open (a family on the ready-made Bulldogs team never
+     sees "U10BB Burlington Bulldogs Blue"). With no team folder at all: the teams that don't have
+     one. Before the first Check for updates nothing is known yet, so every team shows. */
+  pool() {
     if (Perm.admin()) return show.teams;
-    let ids = settings.follow;
-    if (!ids || !ids.length) {
-      const access = (settings.teamAccess || []).filter(id => show.teams.some(t => t.id === id));
-      ids = access.length ? access : null;
-    }
-    const l = ids ? show.teams.filter(t => ids.includes(t.id)) : show.teams;
+    const access = (settings.teamAccess || []).filter(id => show.teams.some(t => t.id === id));
+    const withFolder = new Set((Packs.cfg.teams || []).filter(t => t.folder).map(t => t.id));
+    const l = access.length ? show.teams.filter(t => access.includes(t.id)) : show.teams.filter(t => !withFolder.has(t.id));
     return l.length ? l : show.teams;
+  },
+  // the teams in the team button: the pool, narrowed by Settings › Teams on this device
+  list() {
+    const pool = this.pool();
+    if (Perm.admin()) return pool;
+    const ids = (settings.follow || []).filter(id => pool.some(t => t.id === id));
+    return ids.length ? pool.filter(t => ids.includes(t.id)) : pool;
   },
   goalHorn(team) {
     return (team.goalHorn && idx.sounds.get(team.goalHorn)) || this.allGoalHorns()[0] || null;
@@ -2973,8 +2980,9 @@ const Settings = {
     $('#teamList').innerHTML = Teams.list().map(t => `<div class="team-line">${Teams.badge(t)}<b>${esc(t.full)}<small>${Packs.packs[t.id] ? 'Team settings from its own folder' : 'Uses the shared library'}</small></b>${Perm.teamSettings(t) ? `<button class="mini" data-edit-team="${esc(t.id)}">${ICONS.pen}Edit</button>` : ''}</div>`).join('');
     // which teams this device shows (organizers always see every team)
     const shown = new Set(Teams.list().map(t => t.id));
-    $('#followWrap').hidden = Perm.admin() || show.teams.length < 2;
-    $('#followList').innerHTML = show.teams.map(t => `<label class="setting"><span>${Teams.badge(t)} ${esc(t.full)}</span><input type="checkbox" data-follow="${esc(t.id)}"${shown.has(t.id) ? ' checked' : ''}></label>`).join('');
+    const pool = Teams.pool();
+    $('#followWrap').hidden = Perm.admin() || pool.length < 2;
+    $('#followList').innerHTML = pool.map(t => `<label class="setting"><span>${Teams.badge(t)} ${esc(t.full)}</span><input type="checkbox" data-follow="${esc(t.id)}"${shown.has(t.id) ? ' checked' : ''}></label>`).join('');
     try {
       const est = await navigator.storage?.estimate?.();
       if (est) $('#storageInfo').textContent = `Using ${(est.usage / 1e9).toFixed(2)} GB of about ${(est.quota / 1e9).toFixed(0)} GB available to this app.`;
