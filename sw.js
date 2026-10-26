@@ -9,7 +9,7 @@
      quiet release, as soon as the app is on screen with nothing playing; see activate below).
 
    Bump VERSION whenever you change app files. */
-const VERSION = 'rinkside-v32';
+const VERSION = 'rinkside-v34';
 const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'version.js', 'manifest.webmanifest', 'icon.svg', 'show.json', 'release-notes.json',
   'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png',
   'fonts/barlow-latin-400-normal.woff2', 'fonts/barlow-latin-500-normal.woff2', 'fonts/barlow-latin-600-normal.woff2',
@@ -60,6 +60,8 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
   // only the app's own files: never Google Drive downloads or sign-in (songs are stored in IndexedDB)
   if (url.origin !== self.location.origin || !url.href.startsWith(HOME)) return;
+  // the full guide (guide/) is a normal web page, updated without a new app version: never the app's saved copy
+  if (url.href.startsWith(HOME + 'guide/')) return;
   e.respondWith((async () => {
     const key = req.mode === 'navigate' ? HOME : url.href.split('#')[0];
     const saved = await caches.match(key, { ignoreSearch: true, cacheName: VERSION }) || await caches.match(key, { ignoreSearch: true });

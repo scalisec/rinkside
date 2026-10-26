@@ -62,13 +62,20 @@
 </dialog>
 
 <!-- ============ Settings ============ -->
-<dialog id="settings" aria-labelledby="settingsTitle">
+<dialog id="settings" aria-labelledby="settingsTitle" class="settings-dlg">
   <div class="dlg-head">
     <h2 id="settingsTitle">Settings</h2>
     <button id="closeSettings" class="btn">Done</button>
+  <div class="stabs" role="tablist" aria-label="Settings sections">
+    <button type="button" role="tab" id="stab-updates" data-stab="updates" aria-controls="spanel-updates">Updates</button>
+    <button type="button" role="tab" id="stab-publish" data-stab="publish" aria-controls="spanel-publish" hidden>Publish <span id="pubCount" class="tab-count" hidden></span></button>
+    <button type="button" role="tab" id="stab-playback" data-stab="playback" aria-controls="spanel-playback">Playback</button>
+    <button type="button" role="tab" id="stab-phone" data-stab="phone" aria-controls="spanel-phone">This device</button>
+  </div>
   </div>
   <div class="dlg-body">
-    <h3 id="driveSection">Get Most Recent Updates</h3>
+    <section class="spanel" id="spanel-updates" role="tabpanel" aria-labelledby="stab-updates" data-panel="updates">
+    <h3 id="driveSection">Get the newest music and buttons</h3>
     <p class="hint" id="driveIntroOnline">Gets the newest layout and any new or changed songs from the team's Google Drive folder (<b>Hockey Music App</b>). You'll sign in with your Google account: only people the organizer has shared the folder with can download. The first time downloads every song (about 2&nbsp;GB), so use good wifi and keep the app open until it finishes.</p>
     <p class="hint warn-text" id="driveNotReady" hidden>Getting music needs Google sign-in, which only works when Rinkside is opened from its Home Screen icon or its web address (scalisec.github.io/rinkside).</p>
     <div class="row">
@@ -87,10 +94,20 @@
     <div class="row" id="driveStopRow" hidden><button id="driveStop" class="btn">Stop</button></div>
     <p id="driveProgress" class="progress drive-progress" aria-live="polite"></p>
     </div>
+    <p id="driveLast" class="hint"></p>
+    </section>
+
+    <section class="spanel" id="spanel-publish" role="tabpanel" aria-labelledby="stab-publish" data-panel="publish" hidden>
     <div id="publishBox" class="publish" hidden>
-      <h4>Publish to Drive</h4>
-      <p class="hint" id="pubHintBase">Sends this device's changes, and any songs you've added, to Google Drive. Nothing in Drive is deleted, and Drive keeps earlier versions. Volunteers get the changes when they tap Check for updates.</p>
-      <div class="row"><button id="drivePublish" class="btn">Publish shared library</button><span id="pubTeams" class="row-inline"></span></div>
+      <p class="hint">Sends your changes, and any songs you added, to Google Drive. Volunteers get them the next time they tap Check for updates. Nothing in Drive is deleted, and Drive keeps earlier versions.</p>
+      <div id="pubTargets" class="pub-targets">
+        <div class="pub-row" id="pubBaseRow" data-target="base">
+          <span class="pub-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+          <span class="pub-text"><b>Shared library</b><small id="pubBaseSum"></small></span>
+          <button id="drivePublish" class="btn">Publish</button>
+        </div>
+        <div id="pubTeams"></div>
+      </div>
       <details id="redoBox" class="clean-list" hidden><summary id="redoSum">Changes you still need to make again</summary>
         <p class="hint">You got the latest layout from Drive before publishing, so these changes from this device were replaced. Make them again in Edit, then publish.</p>
         <ul id="redoList"></ul>
@@ -101,16 +118,37 @@
         <div class="row"><button id="pubGo" class="btn primary">Publish now</button><button id="pubNo" class="btn">Cancel</button></div>
       </div>
     </div>
-    <p id="driveLast" class="hint"></p>
+    <div id="advanced" class="advanced" hidden>
+      <h3>Organizer</h3>
+      <div id="adminRow" class="row" hidden><button id="adminOpen" class="btn">Admin: teams and access</button></div>
+      <div class="share-card">
+        <b>Layout file</b>
+        <p class="hint">The tabs, buttons, playlists and teams in one small file: a backup, or a way to try a layout before publishing it. Drive also keeps earlier layouts in its version history.</p>
+        <div class="row"><button id="saveLayout" class="btn">Save layout file…</button><label class="btn file-btn">Open a layout file<input id="openShow" type="file" accept=".json,application/json"></label></div>
+      </div>
+      <div id="confirmOpen" class="confirm" hidden>
+        <p id="confirmText"></p>
+        <div class="row"><button id="confirmYes" class="btn primary">Open it</button><button id="confirmNo" class="btn">Cancel</button></div>
+      </div>
+      <p id="shareProgress" class="progress" aria-live="polite"></p>
+    </div>
+    </section>
 
+    <section class="spanel" id="spanel-playback" role="tabpanel" aria-labelledby="stab-playback" data-panel="playback" hidden>
+    <div class="setting"><span>Fade-out length</span><span id="fadeLenOut" class="num"></span>
+      <input id="fadeLen" type="range" min="0.5" max="8" step="0.5" aria-label="Fade-out length"></div>
+    <div class="setting"><span>Playlist crossfade</span><span id="xfadeLenOut" class="num"></span>
+      <input id="xfadeLen" type="range" min="0" max="10" step="0.5" aria-label="Playlist crossfade"></div>
+    <label class="setting"><span>Skip songs already played this game</span><input id="skipPlayed" type="checkbox"></label>
+    </section>
+
+    <section class="spanel" id="spanel-phone" role="tabpanel" aria-labelledby="stab-phone" data-panel="phone" hidden>
     <h3>Teams</h3>
     <div id="teamList" class="team-list"></div>
     <details id="followWrap" class="follow" hidden><summary>Teams on this device</summary>
       <p class="hint">Pick the teams you run music for. Only these appear in the team button at the top.</p>
       <div id="followList"></div>
     </details>
-    <div id="adminRow" class="row" hidden><button id="adminOpen" class="btn">Admin: teams and access</button></div>
-
     <h3>Music on this device</h3>
     <div id="libStat" class="stat">0</div>
     <p class="hint">Songs are saved on this device, so game day works without wifi. To add a new song to a button, use <b>Edit</b> › <b>Add songs</b>.</p>
@@ -131,67 +169,57 @@
     <p id="storageWarn" class="hint warn-text" hidden>This copy was opened in a way that can't save music on the device, so you'll need to add your music each time. Open Rinkside from its Home Screen icon (not a private browsing window) to keep your music.</p>
     <details id="missingWrap"><summary><span id="missingCount">0</span> songs still missing</summary><ul id="missingList" class="missing-list"></ul></details>
     <p id="storageInfo" class="hint"></p>
-
     <h3>Start over</h3>
     <p class="hint">Made a mess with Edit? This puts back the team's layout from Google Drive: the tabs, buttons and playlists everyone else has. Changes you made on this device are replaced. Your music stays.</p>
     <div class="row"><button id="resetShow" class="btn">Reset to the Drive layout</button></div>
     <p id="resetProgress" class="progress" aria-live="polite"></p>
-
-    <details id="advanced" class="advanced" hidden>
-      <summary>Advanced (organizer)</summary>
-      <p class="hint">Only people who can edit the team's Drive folder see this.</p>
-      <div class="share-card">
-        <b>Layout file</b>
-        <p class="hint">Tabs, buttons, cut points, playlists, groups, teams and logos in one small file: a backup, or a way to try a layout without publishing it. Drive also keeps earlier layouts in its version history.</p>
-        <div class="row"><button id="saveLayout" class="btn">Save layout file…</button><label class="btn file-btn">Open a layout file<input id="openShow" type="file"></label></div>
-      </div>
-      <div class="share-card">
-        <b>Full show pack</b>
-        <p class="hint">Everything, including the music on this device, in one large file (often 1–4 GB). Only needed to copy the app to another device with no internet. Normally use <strong>Check for updates</strong> instead.</p>
-        <div class="row"><button id="savePack" class="btn">Save show pack…</button><label class="btn file-btn">Open a show pack<input id="openPack" type="file"></label></div>
-      </div>
-      <p class="hint">On a computer (Chrome or Edge), you'll be asked where to save. Phones and tablets save to the Downloads folder.</p>
-      <div id="confirmOpen" class="confirm" hidden>
-        <p id="confirmText"></p>
-        <div class="row"><button id="confirmYes" class="btn primary">Open it</button><button id="confirmNo" class="btn">Cancel</button></div>
-      </div>
-      <p id="shareProgress" class="progress" aria-live="polite"></p>
-      <div class="share-card" id="driveConn">
-        <b>Drive connection</b>
-        <label class="field">Google Drive folder link<input id="driveFolder" type="url" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the team folder"></label>
-        <label class="field">Google sign-in client ID<input id="driveClient" type="text" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the built-in one"></label>
-        <p class="hint">The folder holds the layout file (.rinkside.json) and the music folders. Share it with each volunteer's Google account (Viewer). Leave both blank unless you're testing; they only change this device.</p>
-      </div>
-    </details>
-
-    <h3>Playback</h3>
-    <div class="setting"><span>Fade-out length</span><span id="fadeLenOut" class="num"></span>
-      <input id="fadeLen" type="range" min="0.5" max="8" step="0.5" aria-label="Fade-out length"></div>
-    <div class="setting"><span>Playlist crossfade</span><span id="xfadeLenOut" class="num"></span>
-      <input id="xfadeLen" type="range" min="0" max="10" step="0.5" aria-label="Playlist crossfade"></div>
-    <label class="setting"><span>Skip songs already played this game</span><input id="skipPlayed" type="checkbox"></label>
     <p class="hint about" data-about></p>
+    </section>
   </div>
 </dialog>
 
 <!-- ============ Admin (organizers only) ============ -->
-<dialog id="admin" aria-labelledby="adminTitle">
+<dialog id="admin" aria-labelledby="adminTitle" class="admin-dlg">
   <div class="dlg-head">
-    <h2 id="adminTitle">Admin</h2>
-    <button id="adminClose" class="btn">Done</button>
+    <div class="admin-title"><h2 id="adminTitle">Admin</h2><small id="adminChecked">Teams, people and access</small></div>
+    <div class="row"><button id="adminCheck" class="btn">Check again</button><button id="adminClose" class="btn">Done</button></div>
+    <div class="stabs admin-tabs" role="tablist" aria-label="Admin views">
+      <button type="button" role="tab" id="atab-teams" data-atab="teams" aria-controls="apanel-teams">Teams</button>
+      <button type="button" role="tab" id="atab-people" data-atab="people" aria-controls="apanel-people">People</button>
+      <button type="button" role="tab" id="atab-library" data-atab="library" aria-controls="apanel-library">Shared library</button>
+    </div>
   </div>
   <div class="dlg-body">
-    <p class="hint">Teams, their Drive folders and who can get the music. Only organizers see this.</p>
-    <div class="row"><button id="adminCheck" class="btn primary">Check teams and access</button></div>
     <p id="adminProgress" class="progress" aria-live="polite"></p>
-    <h3>Teams</h3>
-    <p class="hint">A team that wants its own goal horn, intro and playlists keeps a folder in its own Google Drive and shares it with you (Viewer) and its music volunteer (Editor). Paste the folder's link here, then tap <b>Save team folders</b>. Teams without a folder use the shared library.</p>
-    <div id="adminTeams" class="admin-teams"></div>
-    <div class="row"><button id="adminSave" class="btn primary">Save team folders</button><button id="adminAddTeam" class="btn">Add a team</button></div>
-    <h3>Shared library access</h3>
-    <p class="hint">Who the <b>Hockey Music App</b> folder is shared with. Editors can publish the shared library; Viewers can download it.</p>
-    <div id="adminAccess" class="admin-access"><p class="hint">Tap Check teams and access.</p></div>
-    <p class="hint warn-text">Also add every new person in Google Cloud (Rinkside project › Google Auth Platform › Audience › <b>Test users</b>). The app can't see that list.</p>
+    <section id="apanel-teams" class="apanel" role="tabpanel" aria-labelledby="atab-teams" data-apanel="teams">
+      <div id="adminTiles" class="admin-tiles"></div>
+      <div class="admin-tools">
+        <label class="admin-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="adminSearch" type="search" placeholder="Search teams or people" aria-label="Search teams or people" autocomplete="off"></label>
+        <div id="adminFilters" class="admin-filters" role="group" aria-label="Show"></div>
+        <button id="adminAddTeam" class="btn">+ Add a team</button>
+      </div>
+      <div class="admin-split">
+        <div class="admin-list">
+          <div class="admin-cols" aria-hidden="true"><span>Team</span><span>Music volunteers</span><span>Viewers</span><span>Own songs</span><span>Last published</span><span>Status</span></div>
+          <div id="adminTeams" class="admin-teams" role="list"></div>
+        </div>
+        <aside id="adminDetail" class="admin-detail" aria-live="polite"></aside>
+      </div>
+    </section>
+    <section id="apanel-people" class="apanel" role="tabpanel" aria-labelledby="atab-people" data-apanel="people" hidden>
+      <div class="admin-tools">
+        <label class="admin-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="adminPeopleSearch" type="search" placeholder="Search people" aria-label="Search people" autocomplete="off"></label>
+        <span id="adminPeopleCount" class="hint"></span>
+        <button id="adminCopyAll" class="btn">Copy all emails</button>
+      </div>
+      <div class="admin-grid-wrap"><table id="adminPeople" class="admin-grid"></table></div>
+      <p class="hint"><span class="role-chip editor">Editor</span> changes and publishes · <span class="role-chip viewer">Viewer</span> plays · <span class="role-chip missing">No library</span> has a team but not the shared library, so no music. Add or remove people with Share in Google Drive.</p>
+    </section>
+    <section id="apanel-library" class="apanel" role="tabpanel" aria-labelledby="atab-library" data-apanel="library" hidden>
+      <p class="hint">Who the <b>Hockey Music App</b> folder is shared with. Editors can publish the shared library; Viewers can download it.</p>
+      <div id="adminAccess" class="admin-access"><p class="hint">Tap Check again.</p></div>
+      <p class="hint warn-text">Also add every new person in Google Cloud (Rinkside project › Google Auth Platform › Audience › <b>Test users</b>). The app can't see that list.</p>
+    </section>
   </div>
 </dialog>
 
@@ -203,119 +231,50 @@
   </div>
   <div class="dlg-body">
     <p class="version-line" data-version></p>
-    <details id="whatsNew" class="whats-new"><summary>What's new in Rinkside</summary><div id="notesList"></div>
-      <p class="hint"><a href="#appHistory" id="toHistory">See every past update</a> (App history, at the end of Help)</p></details>
-    <h3>Running a game (volunteers)</h3>
-    <ul class="steps">
-      <li><b>Pick the team</b>: tap the team button at the top left and choose from the list. The big GOAL! button, Pregame, Game music and the team's own tabs follow the team.</li>
-      <li><b>Tap a button to play it.</b> Tap it again to fade it out.</li>
-      <li><b>Fade out all</b> (big red button) when the puck drops. <b>Stop</b> cuts everything instantly.</li>
-      <li><b>Game music</b>: the first tap starts the team's playlist. Every tap after that plays the next song.</li>
-      <li><b>Random buttons</b> (Penalty, Icing, …) pick a song that hasn't played yet this game.</li>
-      <li><b>New game</b> (tap twice) clears the “Played” marks before puck drop.</li>
-      <li><b>Lock</b> hides settings and editing. Press and hold the lock for a second and a half to unlock.</li>
-    </ul>
+    <a class="guide-link" href="guide/" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5V21h16"/></svg>
+      <span><b>Full guide</b><small>Every question, step by step, for iPhone and Android. Opens in your browser.</small></span>
+      <svg class="out" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg>
+    </a>
 
-    <h3>Questions</h3>
-    <details><summary>How do I get the music, and the newest songs and layout?</summary>
-      <p>On good wifi, unlock, open <b>Settings</b> and tap <b>Download all music</b> (the first time) or <b>Check for updates</b> (after that). Sign in with the Google account the organizer shared the music with. The app shows what's new; tap <b>Download now</b>. Only new or changed songs are downloaded, so updates are quick.</p>
-      <p>You get the shared library plus your team's own goal horn, intro, game music and tabs, if your team has its own Drive folder.</p>
-      <p>The first time, Google warns that it hasn't verified the app: tap <b>Continue</b>. If a big download stops (the screen locked, the wifi dropped, or the sign-in ran out after an hour), tap <b>Check for updates</b> again: it carries on where it stopped.</p></details>
-    <details><summary>Where did the Edit button go?</summary>
-      <p>Changes now go to everyone on the team, so only the organizer and each team's music volunteer can make them. Everyone else gets the changes with <b>Check for updates</b>. If something should change, tell your team's music volunteer.</p></details>
-    <details><summary>The team button shows the wrong teams.</summary>
-      <p>The team button lists the teams your Google account has access to. On wifi, open <b>Settings</b> and tap <b>Check for updates</b>: the list updates to match.</p>
-      <p>Your team is missing? Ask the organizer to give your Google account access to it.</p>
-      <p>You run music for more than one team? Open <b>Settings › Teams › Teams on this device</b> and tick only the ones you want in the team button.</p></details>
+    <h3>Game day</h3>
+    <ol class="steps">
+      <li>At home on wifi: <b>Settings › Check for updates</b>.</li>
+      <li>At the rink: connect Bluetooth first, then open the app.</li>
+      <li>Tap <b>New game</b> twice to clear last game's “Played” marks.</li>
+      <li>Tap a button to play it. Tap it again to fade it out. <b>Game music</b>: each tap plays the next song.</li>
+      <li><b>Fade out all</b> when the puck drops. <b>Stop</b> cuts everything at once.</li>
+    </ol>
 
-    <h3>Changing buttons (organizer and team music volunteers)</h3>
-    <p class="hint">The organizer changes the shared library. A team's music volunteer changes that team: its goal horn, intro, game music, its own tabs and songs, and which shared tabs it hides. Shared tabs show “only the organizer can change it” in Edit.</p>
-    <details><summary>I'm my team's music volunteer. How do I change our team?</summary>
-      <ol class="steps">
-        <li>Tap <b>Check for updates</b> first, so you start from the newest version.</li>
-        <li>Tap <b>Edit</b>. Tap the team button (or the GOAL! button) to set your <b>goal horn</b>, <b>pregame</b> and <b>game music</b> playlists.</li>
-        <li>Tap <b>New tab</b> for your own songs (player intros, goal announcements…), then <b>Add songs</b>. Songs on your own tabs go to your team's folder only.</li>
-        <li>Don't need a shared tab, like Holiday Music? Open it and tap <b>Hide this tab for</b> your team.</li>
-        <li>Tap <b>Done</b>, open <b>Settings</b> and tap <b>Publish</b> with your team's name. Everyone on your team gets it with Check for updates.</li>
-      </ol></details>
-    <details><summary>How do I add a new song?</summary>
-      <p>Unlock, tap <b>Edit</b>, open the tab you want, and tap <b>Add songs</b>. Pick one or more MP3 files. Each file becomes a button named after the file. Tap the new button to rename it, set its colour and set its start point. Tap <b>Done</b> at the top when you're finished.</p></details>
-    <details><summary>How do I make a song start at the good part?</summary>
-      <p>In Edit, tap the button, then <b>Play from 0:00</b>. When the part you want hits, tap <b>Set start here</b>. Tap <b>Listen from start point</b> to check it. For a short clip, also tap <b>Set stop here</b> where it should end. You can type exact seconds instead.</p></details>
-    <details><summary>How do I change or replace a song on a button?</summary>
-      <p>In Edit, tap the button and use <b>Choose a different file</b>. The button keeps its name, colour and place. Check the start point afterwards, because the new file may be different.</p></details>
-    <details><summary>How do the Game Day groups (Penalty, Icing…) work?</summary>
-      <p>They come from button names. The Penalty group plays a random song from every button whose name starts with “Penalty”, on any tab. To add a song to a group, rename its button, for example “Penalty - Sabotage - Beastie Boys”. To remove it, rename it without the word at the start.</p>
-      <p>To make a new group, go to Game Day, tap <b>Edit</b>, then <b>Edit groups</b> next to Whistles, Moments or Game over. Give it a label and the starting text to match. The count next to each group shows how many songs it found.</p></details>
-    <details><summary>How do I change the goal horn or a team's playlists?</summary>
-      <p>In Edit, tap the team button at the top and choose the team (or <b>Add a team</b>), or tap the big GOAL! button. Choose the goal horn, the pregame playlist and the game music playlist. Only buttons with “Goal Horn” in their name show up as goal horns.</p></details>
-    <details><summary>How do I make or change a playlist?</summary>
-      <p>In Edit, open a tab and tap <b>Add playlist</b>, or tap an existing playlist button. Search for songs and tap them to add. Use the arrows to change the order and ✕ to remove a song. The songs stay on their own tabs too.</p></details>
-    <details><summary>How do I add, rename or reorder tabs?</summary>
-      <p>In Edit, tap <b>New tab</b> at the end of the tab row. To change a tab, open it and tap <b>Tab settings</b>: rename it, pick a colour, move it left or right, add a whole folder of songs, or delete it.</p></details>
-    <details><summary>How do I move or copy a button to another tab?</summary>
-      <p>In Edit, tap the button. Change <b>Tab</b> to move it, or use <b>Also put a copy on</b> to show it in two places. Use <b>Move earlier</b> and <b>Move later</b> to change its position.</p></details>
-    <details><summary>How does a new volunteer or tablet get set up?</summary>
-      <p>Everyone gets the music and the buttons from the team's Google Drive folder. The organizer shares the <b>Hockey Music App</b> folder with the volunteer's Google account. Then, on the new phone or tablet, open the app from its web address, add it to the Home Screen, and tap <b>Settings › Download all music</b> on wifi.</p></details>
-    <details><summary>Some buttons have dashed outlines and say “File not loaded”.</summary>
-      <p>That song file isn't on this device. Open Settings and tap <b>Check for updates</b> on wifi to download it. Settings lists every missing song under <b>Music on this device</b>. If it's a song you added yourself, open the button in Edit and choose the file again.</p></details>
-    <details><summary>How do I put it on the home screen with the hockey icon?</summary>
-      <p><b>Android:</b> open the app's web address in Chrome, tap Chrome's menu (⋮), then <b>Add to Home screen</b> (or <b>Install app</b>). The crossed-sticks icon appears on the home screen, and the app opens without Chrome's address bar.</p>
-      <p><b>iPhone / iPad:</b> open the web address in Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>.</p></details>
-    <details><summary>Can I use it on an iPhone or iPad?</summary>
-      <p>Yes, from its web address in <b>Safari</b>. Open the address, tap <b>Share</b>, then <b>Add to Home Screen</b>, and always open it from that icon: Safari can clear a website's saved music if it isn't on the Home Screen.</p>
-      <p>To get the music, open <b>Settings › Download all music</b> and sign in with Google. If there's no sound while the ring/silent switch is on silent, update iOS.</p>
-      <p>The first download is about 2&nbsp;GB. Make sure there's room, and keep the screen on (Settings › Display &amp; Brightness › Auto-Lock) until it finishes.</p></details>
-    <details><summary>The tablet screen turns off or locks during the game.</summary>
-      <p><b>iPhone / iPad:</b> before the game, open the <b>Settings</b> app › <b>Display &amp; Brightness</b> › <b>Auto-Lock</b> and pick the longest time (or Never).</p>
-      <p><b>Android:</b> change the tablet's own setting before the game: <b>Settings &gt; Display &gt; Screen timeout</b>, and pick the longest time (often 10 or 30 minutes). Some tablets also have <b>Settings &gt; Developer options &gt; Stay awake</b>, which keeps the screen on while it's charging.</p></details>
-    <details><summary>The sound is a little late on the Bluetooth speaker.</summary>
-      <p>Bluetooth always adds a short delay. Tap goal horns as soon as the goal is scored. A cable to the sound system has no delay.</p></details>
+    <h3>Common questions</h3>
     <details><summary>Nothing plays.</summary>
-      <p>Check the tablet volume and the Master slider. Make sure the Bluetooth speaker is connected before opening the app. Buttons with dashed outlines don't have their song file on this device yet.</p></details>
-    <details><summary>My phone or tablet is running out of space.</summary>
-      <p>Open <b>Settings</b> (the gear), scroll to <b>Music on this device</b> and tap <b>Clean up storage</b>. The app checks your songs and shows what it would remove: extra copies of the same song, and songs no button uses. <b>Nothing is deleted until you tap Remove.</b></p>
-      <p>Extra copies are ticked for you; every button keeps playing. Songs no button uses are only removed if you tick them. To start fresh, tick <b>Remove all songs</b>: the buttons stay, and you download the music again on wifi. Anything removed can be downloaded again with <b>Check for updates</b>.</p>
-      <p>Old downloads also take space: delete <b>.zip</b>, <b>.rinkpack</b> and old <b>Rinkside</b> files from the <b>Files</b> app (iPhone) or <b>Files / My Files</b> (Android).</p></details>
-    <details><summary>It asks “Already on this device”.</summary>
-      <p>Some songs you're adding are already saved. <b>Keep the ones on this device</b> skips them; <b>Replace them</b> swaps in the files you picked. Either way the app doesn't save a second copy. <b>Cancel</b> adds nothing.</p></details>
+      <p>Check the phone or tablet volume and the Master slider, and that Bluetooth is connected. Buttons with a dashed outline are songs not on this device yet: tap <b>Settings › Check for updates</b> on wifi.</p></details>
+    <details><summary>The sound is a little late on the speaker.</summary>
+      <p>Bluetooth always adds a short delay. Tap the goal horn as soon as the goal is scored. A cable to the sound system has no delay.</p></details>
+    <details><summary>The screen turns off during the game.</summary>
+      <p><b>iPhone / iPad:</b> Settings app › Display &amp; Brightness › Auto-Lock › the longest time. <b>Android:</b> Settings › Display › Screen timeout › the longest time.</p></details>
     <details><summary>It says “A new version of Rinkside is ready.”</summary>
-      <p>The app downloaded an update by itself in the background. The message only appears when nothing is playing, so it never interrupts a song. Tap <b>See what's new</b> to see what's in it before you decide.</p>
-      <p><b>Update now</b> restarts the app on the new version. It takes a second or two. Your music, buttons and settings stay as they are.</p>
-      <p><b>Later</b> hides the message and you keep going as normal. The new version is used the next time you open the app.</p>
-      <p>Right after an update you'll see <b>Rinkside updated to …</b> once, with <b>See what's new</b>. The last three updates are at the top of this Help, under <b>What's new in Rinkside</b>; every update since 2.1 is under <b>App history</b> at the end of Help.</p>
-      <p><b>Small fixes install by themselves</b>, with no message. When you open the app or come back to it and nothing is playing, the screen may blink for a second: that's the update. Your team, music and buttons stay as they are. Small fixes are still listed under <b>App history</b>.</p>
-      <p>The app always opens from the copy saved on your device, so it opens straight away even on weak rink wifi or with no internet.</p></details>
+      <p>Tap <b>Update now</b> when nothing is playing (close Settings first). Your music, buttons and settings stay. Small fixes install by themselves; the screen may blink for a second.</p></details>
+    <details><summary>The team button shows the wrong teams.</summary>
+      <p>It lists the teams your Google account has access to. Tap <b>Settings › Check for updates</b> on wifi. Team missing? Ask your organizer. Too many teams? <b>Settings › This device › Teams on this device</b>.</p></details>
+    <details><summary>How do the random buttons (Penalty, Icing…) work?</summary>
+      <p>Each tap plays a song from that group that hasn't played yet this game. A group with only a few songs comes back around sooner.</p></details>
+    <details><summary>My phone is running out of space.</summary>
+      <p><b>Settings › This device › Clean up storage</b>. It shows what it would remove before anything is deleted.</p></details>
+    <details><summary>I'm my team's music volunteer. How do I change our music?</summary>
+      <p>Tap <b>Check for updates</b>, then <b>Edit</b>. Tap the team button to pick the goal horn and playlists. Then <b>Settings › Publish</b> and tap <b>Publish</b> next to your team.</p></details>
     <details><summary>I made a mess. Can I undo?</summary>
-      <p>Yes. Open <b>Settings</b>, scroll to <b>Start over</b> and tap <b>Reset to the Drive layout</b> (tap it twice). It puts back the team's layout from Google Drive: what everyone else has. Your music stays.</p>
-      <p>No internet, or not signed in? It uses the layout from your last Check for updates (or the one built into the app) and tells you. Tap <b>Check for updates</b> on wifi later to get anything newer.</p></details>
+      <p><b>Settings › This device › Reset to the Drive layout</b> (tap twice). Your music stays.</p></details>
 
     <div id="helpOrganizer" hidden>
-    <h3>For the organizer</h3>
-    <p class="hint">You see this because your Google account can edit the team's Drive folder.</p>
-    <details><summary>How do I publish an update for everyone?</summary>
-      <p>Publishing the shared library is for people with <b>Editor</b> access to the Hockey Music App folder in Google Drive. Volunteers have Viewer access, so they don't see Edit or Publish. Teams with their own folder publish their own team settings.</p>
-      <p>Tap <b>Check for updates</b> first, so you start from the newest layout. Make your changes in <b>Edit</b>, then open <b>Settings</b> and tap <b>Publish shared library</b>. The first time, Google asks for permission to change files in Drive. The app shows what it will send (the layout and any new songs), then uploads it. New songs go into the matching category folder under Hockey Songs. Nothing in Drive is deleted, and Drive keeps earlier layouts in its version history (right-click the layout file › Manage versions).</p>
-      <p>Volunteers get the changes the next time they tap <b>Check for updates</b>.</p></details>
-    <details><summary>It says “Someone published since your last update”.</summary>
-      <p>Another editor (or you, from another device) published the layout after this device last got it. Publishing now would wipe out their changes, so the app asks first.</p>
-      <p><b>Get latest first</b> (best): puts Drive's layout on this device. Your changes are listed under <b>Publish to Drive</b> as changes to make again. Make them in Edit, publish, and the list clears.</p>
-      <p><b>Publish anyway</b>: replaces Drive's layout with yours. Theirs is still in Drive's version history if you need it. <b>Cancel</b> changes nothing.</p>
-      <p>To avoid it, only one person edits at a time, and always tap Check for updates before starting.</p></details>
-    <details><summary>How do I add a team, or see who has access? (Admin)</summary>
-      <p>Open <b>Settings › Admin: teams and access</b> and tap <b>Check teams and access</b>. You see each team, whether its Drive folder is shared with you, its music volunteers, when it last published, and who the shared library is shared with.</p>
-      <p><b>A team that picks a ready-made team</b> (Burlington Bulldogs, Barracudas or Eagles): in Google Drive, share <b>Hockey Music App</b> and that team's folder (for example <b>Rinkside – Burlington Bulldogs</b>) with each volunteer's Gmail as <b>Viewer</b>, and add each Gmail as a test user in Google Cloud. Nothing else to set up: the team shows up on their phones after Check for updates.</p>
-      <p><b>A team that wants its own goal horn, intro and playlists</b> follows the onboarding guide: it makes a folder in its own Google Drive and shares it with you (Viewer) and its music volunteer (Editor). Paste the folder's link next to the team and tap <b>Save team folders</b>.</p>
-      <p><b>A brand-new team</b>: tap <b>Add a team</b>, name it, then <b>Publish shared library</b>. Also share Hockey Music App with the team's people (Viewer) and add them as test users in Google Cloud.</p></details>
-    <details><summary>Layout files, show packs and the Drive connection</summary>
-      <p>They're under <b>Settings › Advanced (organizer)</b>. Volunteers don't see them.</p>
-      <p><b>Layout file</b>: the buttons, playlists and teams in one small file. A backup, or a way to try a layout on one device without publishing it. Drive's version history usually does the same job.</p>
-      <p><b>Show pack</b>: everything including the music (1–4 GB), for a device with no internet. Make it on an Android tablet or a computer; saving one on an iPhone or iPad may not work.</p>
-      <p><b>Drive connection</b>: leave both boxes blank. They're only for pointing one device at a test folder.</p></details>
-    <details><summary>Can I edit on my computer instead of the tablet?</summary>
-      <p>Yes. Open the app's web address in Chrome on your computer, sign in with Check for updates, make your changes in Edit and tap <b>Publish</b>. Everyone gets them with Check for updates. This works for team music volunteers too.</p></details>
+    <h3>For organizers</h3>
+    <p class="hint"><b>Settings › Publish</b> shows each place you can publish to and what changed. <b>Admin</b> (in the same tab) shows every team, who has access, and what needs attention. The full guide covers publishing, Admin and the layout file.</p>
     </div>
+
+    <details id="whatsNew" class="whats-new"><summary>What's new</summary><div id="notesList"></div>
+      <p class="hint"><a href="#appHistory" id="toHistory">Every past update</a></p></details>
     <details id="appHistory" class="whats-new app-history"><summary>App history: every update</summary><div id="historyList"></div></details>
+    <p class="hint">Still stuck? Send your organizer the version line at the top and what happened.</p>
     <p class="hint about" data-about></p>
   </div>
 </dialog>

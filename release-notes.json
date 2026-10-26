@@ -1,5 +1,39 @@
 [
   {
+    "version": "3.3.0",
+    "date": "2026-10-25",
+    "notes": [
+      {
+        "type": "improved",
+        "text": "Settings has four tabs: Updates, Publish, Playback and This device."
+      },
+      {
+        "type": "new",
+        "text": "Organizers and team music volunteers: the Publish tab lists each place you can publish to, with what changed since the last publish."
+      },
+      {
+        "type": "new",
+        "text": "Organizers: the Admin screen has three tabs. Teams shows every team's status at a glance, People shows who has access to what, and Shared library shows who can get the music."
+      },
+      {
+        "type": "improved",
+        "text": "Help is shorter, with a link to the full guide (it opens in your browser)."
+      },
+      {
+        "type": "improved",
+        "text": "The show pack is gone: Check for updates does that job."
+      },
+      {
+        "type": "fixed",
+        "text": "Publishing a team that uses a new button only on this device (like a new goal horn on a shared tab) now reminds you to publish the shared library first, so other devices get it too."
+      },
+      {
+        "type": "improved",
+        "text": "Check for updates now names what's new (the shared library or a team) with its own date."
+      }
+    ]
+  },
+  {
     "version": "3.2.0",
     "date": "2026-10-23",
     "notes": [
