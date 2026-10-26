@@ -789,3 +789,10 @@ dialog.admin-dlg { width: min(1180px, calc(100% - 32px)); }
 @media (max-width: 420px) {
   .stabs [role=tab] { font-size: 13px; padding: 0 4px; }
 }
+
+/* 3.4: drag to reorder in Edit */
+body.editing [data-reorder] .pad[data-id] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.pad.dragging { opacity: .3; outline: 2px dashed var(--live, #6fd4f5) !important; }
+.drag-ghost { position: fixed; z-index: 1000; pointer-events: none; margin: 0; opacity: 1; background-color: var(--bg-pad, #1d2b38) !important; transform: scale(1.05); box-shadow: 0 12px 32px rgba(0, 0, 0, .5); transition: none; }
+body.drag-active { -webkit-user-select: none; user-select: none; cursor: grabbing; }
+.drag-hint { margin-top: 10px; }

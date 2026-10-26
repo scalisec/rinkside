@@ -1,5 +1,19 @@
 [
   {
+    "version": "3.4.0",
+    "date": "2026-10-25",
+    "notes": [
+      {
+        "type": "new",
+        "text": "New songs get buttons by themselves: when the organizer (or a team's music volunteer) taps Check for updates, songs just added to Drive get a button at the end of the matching tab. Publish to send them to everyone."
+      },
+      {
+        "type": "new",
+        "text": "In Edit, press and hold a button, then drag it to move it on its tab."
+      }
+    ]
+  },
+  {
     "version": "3.3.0",
     "date": "2026-10-25",
     "notes": [

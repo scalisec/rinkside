@@ -48,7 +48,7 @@ const DEFAULTS = {
   follow: null,            // 3.1: teams shown on this device (null: decided by Drive access)
 };
 
-const APP_VERSION = '3.3.0';
+const APP_VERSION = '3.4.0';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -1355,7 +1355,8 @@ const UI = {
           <button class="pad add-tile" data-ui="add-playlist" data-tab-id="${esc(tab.id)}">${ICONS.list}<span>Add playlist</span></button>
           <button class="pad add-tile" data-ui="add-next" data-tab-id="${esc(tab.id)}">${ICONS.next}<span>Add Next-song button</span></button>`;
       }
-      html += `<div class="grid">${tab.items.map(i => this.padHtml(i)).join('')}${tiles}</div>`;
+      html += `<div class="grid"${mine ? ` data-reorder="${esc(tab.id)}"` : ''}>${tab.items.map(i => this.padHtml(i)).join('')}${tiles}</div>`;
+      if (mine && tab.items.length > 1) html += `<p class="hint drag-hint">To move a button, press and hold it, then drag it to its new spot.</p>`;
       if (!tab.items.length && !Edit.on) html += `<p class="hint">This tab is empty. Tap Edit, then Add songs.</p>`;
     }
     main.innerHTML = html;
@@ -2158,6 +2159,45 @@ const Drive = {
     }
     return withFolders ? { files: out, folders } : out;
   },
+  /* 3.4: automatic buttons. A song that's new to this device (just added to Drive), that no button uses, in a
+     folder this account can edit (the shared library for the organizer, a team folder for its music volunteer),
+     gets a button at the end of the matching tab. Only on a device that already has a Drive layout, so a first
+     download never fills tabs with old songs that were left without buttons on purpose. */
+  autoCandidates(files, cur) {
+    if (!cur || !settings.driveLayout || !Auth.enabled()) return [];
+    const used = new Set(), bases = new Set();
+    for (const t of cur.tabs) for (const i of t.items) if (i.type === 'sound' && i.file) {
+      const k = norm(i.file).split('/'); used.add(k.slice(-2).join('/')); if (k.length === 1) bases.add(k[0]);
+    }
+    return files.filter(f => (f.team ? (settings.teamEditor || []).includes(f.team) && cur.teams.some(t => t.id === f.team) : settings.driveEditor))
+      .filter(f => { const k = norm(f.path).split('/'); return !used.has(k.slice(-2).join('/')) && !bases.has(k[k.length - 1]); });
+  },
+  async makeButtons(list) {
+    const made = [];
+    for (const f of list) {
+      if (!Library.byTail.get(norm(f.path).split('/').slice(-2).join('/'))) continue; // didn't download
+      const parts = String(f.path).replace(/\\/g, '/').split('/').filter(Boolean);
+      const folder = parts.length > 1 ? parts[parts.length - 2] : '';
+      const generic = !folder || /^hockey songs$/i.test(folder) || /^new songs$/i.test(folder);
+      const same = t => t.name.trim().toLowerCase() === folder.trim().toLowerCase();
+      let tab;
+      if (f.team) {
+        const mine = show.tabs.filter(t => t.team === f.team);
+        tab = (!generic && mine.find(same)) || mine[0];
+        if (!tab) { const team = show.teams.find(t => t.id === f.team); tab = { id: uid(), name: team?.name || 'Team songs', color: team?.color || SWATCHES[show.tabs.length % SWATCHES.length], team: f.team, items: [] }; show.tabs.push(tab); }
+      } else {
+        const name = generic ? 'New songs' : folder;
+        tab = show.tabs.find(t => !t.team && t.name.trim().toLowerCase() === name.toLowerCase());
+        if (!tab) { tab = { id: uid(), name, color: SWATCHES[show.tabs.length % SWATCHES.length], items: [] }; show.tabs.push(tab); }
+      }
+      let length = 0;
+      try { const blob = await Library.blobByKey(Library.byTail.get(norm(f.path).split('/').slice(-2).join('/'))); if (blob) length = await probeDuration(blob); } catch (e) {}
+      tab.items.push({ type: 'sound', id: uid(), name: prettyName(parts[parts.length - 1]), file: parts.slice(-2).join('/'), start: 0, stop: 0, volume: 1, length, color: null });
+      made.push({ name: prettyName(parts[parts.length - 1]), tab: tab.name });
+    }
+    if (made.length) { Show.changed(); settings.localEdits = true; Prefs.save(); await Store.put('kv', 'show', show).catch(() => {}); }
+    return made;
+  },
   pickPack(files) {
     return files.filter(f => /\.rinkside-team\.json$/i.test(f.name))
       .sort((a, b) => (a.path.includes('/') - b.path.includes('/')) || b.modifiedTime.localeCompare(a.modifiedTime))[0] || null;
@@ -2198,7 +2238,7 @@ const Drive = {
     settings.teamAccess = teams.map(t => t.team);
     settings.teamEditor = teams.filter(t => t.editor).map(t => t.team);
     Prefs.save(); applyRole();
-    const songs = [...files.filter(f => AUDIO_EXT.test(f.name)), ...teams.flatMap(t => t.files.filter(f => AUDIO_EXT.test(f.name)))];
+    const songs = [...files.filter(f => AUDIO_EXT.test(f.name)), ...teams.flatMap(t => t.files.filter(f => AUDIO_EXT.test(f.name)).map(f => ({ ...f, team: t.team })))];
     const layouts = files.filter(f => /\.rinkside\.json$/i.test(f.name))
       .sort((a, b) => (a.path.includes('/') - b.path.includes('/')) || b.modifiedTime.localeCompare(a.modifiedTime));
     const layout = layouts[0] || null;
@@ -2233,7 +2273,17 @@ const Drive = {
     const local = [...new Set([...(await Store.keys('audio')), ...Library.mem.keys()])];
     const extra = songs.length ? local.filter(k => !tails.has(tail(k))) : []; // never offer to empty the device
     if (layout) layout.load = () => this.get('files/' + layout.id, { alt: 'media' }).then(r => r.text());
-    this.plan = { source: 'drive', folder, layout, baseNew, packsNew, packsGone, layoutNew, songs, get, update, extra };
+    let auto = this.autoCandidates(get, show);
+    if (auto.length && layoutNew) { // the incoming layout may already have buttons for them (another editor made them)
+      try {
+        const files = [];
+        const add = j => { for (const t of j.tabs || []) for (const i of t.items || []) if (i.type === 'sound' && i.file) files.push(i.file); };
+        if (baseNew && layout) add(JSON.parse((await (await this.get('files/' + layout.id, { alt: 'media' })).text()).replace(/^\uFEFF/, '')));
+        for (const p of packsNew) add(await this.readJson(p.file));
+        auto = this.autoCandidates(auto, { teams: show.teams, tabs: [...show.tabs, { items: files.map(file => ({ type: 'sound', file })) }] });
+      } catch (e) { console.error(e); }
+    }
+    this.plan = { source: 'drive', folder, layout, baseNew, packsNew, packsGone, layoutNew, songs, get, update, extra, auto };
     return this.plan;
   },
 
@@ -2490,6 +2540,9 @@ const Drive = {
         await plan._apply();
         Prefs.save();
       }
+      // 3.4: buttons for new songs (checked again against the layout just applied, which may already have them)
+      let made = [];
+      if (opts.buttons && opts.songs && plan.auto?.length) made = await this.makeButtons(this.autoCandidates(plan.auto, show));
       UI.renderAll();
 
       const got = done - failed;
@@ -2498,6 +2551,10 @@ const Drive = {
       if (newShow) parts.push(`Layout updated${plan.packsNew.length ? ` (with ${plan.packsNew.map(p => p.name).join(', ')})` : ''}.`);
       if (got) parts.push(`${got} song${got === 1 ? '' : 's'} ${plan.source === 'drive' ? 'downloaded' : 'added'}.`);
       if (pruned) parts.push(`${pruned} old song${pruned === 1 ? '' : 's'} removed.`);
+      if (made.length) {
+        const tabs = [...new Set(made.map(m => m.tab))];
+        parts.push(`Made ${made.length} button${made.length === 1 ? '' : 's'} for new songs (${tabs.join(', ')}). Publish ${made.length === 1 ? 'it' : 'them'} in Settings › Publish so everyone gets ${made.length === 1 ? 'it' : 'them'}.`);
+      }
       const left = jobs.length + failed;
       if (lastErr?.message === 'drive:signin') parts.push(`Your Google sign-in ran out with ${left} songs left. Tap Check for updates to sign in again and finish. Songs already downloaded are kept.`);
       else if (full) parts.push(`This device ran out of storage space with ${left} songs left. Free up space (Settings › Clean up storage helps), then ${again.toLowerCase()}.`);
@@ -2784,6 +2841,14 @@ const Settings = {
       $('#driveSongsOpt').checked = true;
       const verb = p.source === 'drive' ? 'Download' : 'Add';
       if (nSongs) $('#driveSongsLbl').textContent = `${verb} ${p.get.length ? `${p.get.length} new` : ''}${p.get.length && p.update.length ? ' and ' : ''}${p.update.length ? `${p.update.length} changed` : ''} song${nSongs === 1 ? '' : 's'} (${gb(songBytes)})`;
+      // 3.4: buttons for new songs (editors only; see Drive.autoCandidates)
+      const auto = p.auto || [];
+      $('#driveButtonsRow').hidden = !auto.length;
+      $('#driveButtonsOpt').checked = true;
+      if (auto.length) {
+        const names = auto.slice(0, 3).map(f => prettyName(String(f.name || f.path).split('/').pop())).join(', ');
+        $('#driveButtonsLbl').textContent = `Make buttons for ${auto.length === 1 ? 'the new song' : `${auto.length} new songs`} (${names}${auto.length > 3 ? ', …' : ''}) at the end of ${auto.length === 1 ? 'its' : 'their'} tab. You can move or delete ${auto.length === 1 ? 'it' : 'them'} in Edit, then publish.`;
+      }
       $('#drivePruneRow').hidden = !p.extra.length;
       $('#drivePruneOpt').checked = false;
       if (p.extra.length) $('#drivePruneLbl').textContent = `Also remove ${p.extra.length} song${p.extra.length === 1 ? '' : 's'} from this device that ${p.extra.length === 1 ? 'isn\'t' : 'aren\'t'} in ${p.source === 'drive' ? 'Drive' : 'this download'} any more${p.source === 'drive' ? '' : ' (only if you downloaded the whole folder, all parts)'}`;
@@ -2920,6 +2985,7 @@ const Settings = {
         layout: !$('#driveLayoutRow').hidden && $('#driveLayoutOpt').checked,
         songs: !$('#driveSongsRow').hidden && $('#driveSongsOpt').checked,
         prune: !$('#drivePruneRow').hidden && $('#drivePruneOpt').checked,
+        buttons: !$('#driveButtonsRow').hidden && $('#driveButtonsOpt').checked,
       };
       $('#drivePlan').hidden = true;
       busy(true); meter(0);
@@ -3288,6 +3354,89 @@ const Admin = {
 
 /* 3.3: the Publish tab lists each place this person can publish to (the shared library for
    organizers, each team they're the music volunteer for), with what changed since the last publish. */
+/* 3.4: in Edit, press and hold a button on a tab you can change, then drag it to a new spot on the same tab.
+   Works with touch (iPhone, Android) and a mouse. The page scrolls normally until the hold kicks in; while
+   dragging, the page doesn't scroll by itself except near the top and bottom edges. Move earlier/later stays. */
+const Drag = {
+  st: null,
+  init() {
+    const main = $('#main');
+    const HOLD = { mouse: 250, pen: 350, touch: 400 };
+    const end = () => {
+      const st = this.st; this.st = null;
+      if (!st) return;
+      clearTimeout(st.timer); clearInterval(st.scroll);
+      st.ghost?.remove(); st.el.classList.remove('dragging'); document.body.classList.remove('drag-active');
+      return st;
+    };
+    main.addEventListener('pointerdown', e => {
+      if (!Edit.on || (e.pointerType === 'mouse' && e.button !== 0) || this.st) return;
+      const el = e.target.closest('.pad[data-id]'), grid = el?.closest('[data-reorder]');
+      if (!el || !grid) return;
+      const st = this.st = { el, grid, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, on: false, moved: false };
+      st.timer = setTimeout(() => this.start(), HOLD[e.pointerType] || 400);
+    });
+    document.addEventListener('pointermove', e => {
+      const st = this.st; if (!st) return;
+      st.x = e.clientX; st.y = e.clientY;
+      if (!st.on) { if (Math.hypot(st.x - st.x0, st.y - st.y0) > 10) end(); return; } // a scroll or a swipe, not a hold
+      e.preventDefault();
+      if (Math.hypot(st.x - st.x0, st.y - st.y0) > 6) st.moved = true;
+      this.follow();
+    }, { passive: false });
+    // once dragging, a moving finger must not scroll the page (iPhone and Android)
+    document.addEventListener('touchmove', e => { if (this.st?.on) e.preventDefault(); }, { passive: false });
+    document.addEventListener('contextmenu', e => { if (this.st) e.preventDefault(); });
+    const up = () => {
+      const st = end(); if (!st || !st.on) return;
+      const ids = [...st.grid.querySelectorAll('.pad[data-id]')].map(x => x.dataset.id);
+      const tab = Show.tab(st.grid.dataset.reorder);
+      const before = tab ? tab.items.map(i => i.id).join() : '';
+      if (tab && ids.length === tab.items.length && ids.join() !== before) {
+        const byId = new Map(tab.items.map(i => [i.id, i]));
+        tab.items = ids.map(id => byId.get(id));
+        Show.changed(); UI.renderMain(); UI.toast('Moved.');
+        this.eat = true;
+      } else if (st.moved) { UI.renderMain(); this.eat = true; }
+      if (this.eat) setTimeout(() => { this.eat = false; }, 350); // only the click that ends this drag
+    };
+    document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', () => { const st = end(); if (st?.on) UI.renderMain(); });
+    // the tap that ends a drag isn't a tap on the button
+    main.addEventListener('click', e => { if (this.eat) { this.eat = false; e.stopPropagation(); e.preventDefault(); } }, true);
+  },
+  start() {
+    const st = this.st; if (!st) return;
+    st.on = true; buzz(20);
+    const r = st.el.getBoundingClientRect();
+    st.dx = st.x - r.left; st.dy = st.y - r.top;
+    const g = st.ghost = st.el.cloneNode(true);
+    g.classList.add('drag-ghost'); g.removeAttribute('data-id'); g.setAttribute('aria-hidden', 'true');
+    Object.assign(g.style, { width: r.width + 'px', height: r.height + 'px', left: r.left + 'px', top: r.top + 'px' });
+    document.body.appendChild(g);
+    st.el.classList.add('dragging'); document.body.classList.add('drag-active');
+    // near the top or bottom edge, scroll so a button can go further up or down the tab
+    st.scroll = setInterval(() => {
+      const edge = 70, h = window.innerHeight;
+      const v = st.y < edge ? -Math.ceil((edge - st.y) / 6) : st.y > h - edge ? Math.ceil((st.y - (h - edge)) / 6) : 0;
+      if (v) { window.scrollBy(0, v); $('#main').scrollTop += v; this.follow(); }
+    }, 16);
+  },
+  follow() {
+    const st = this.st; if (!st?.on) return;
+    st.ghost.style.left = (st.x - st.dx) + 'px'; st.ghost.style.top = (st.y - st.dy) + 'px';
+    st.ghost.style.visibility = 'hidden';
+    const hit = document.elementFromPoint(st.x, st.y);
+    st.ghost.style.visibility = '';
+    const over = hit?.closest('.pad[data-id]');
+    if (!over || over === st.el || over.parentElement !== st.grid) return;
+    const r = over.getBoundingClientRect();
+    const after = st.y > r.bottom - r.height * 0.25 ? true : st.y < r.top + r.height * 0.25 ? false : st.x > r.left + r.width / 2;
+    const ref = after ? over.nextElementSibling : over;
+    if (ref !== st.el && ref !== st.el.nextElementSibling) st.grid.insertBefore(st.el, ref);
+  },
+};
+
 const Pub = {
   norm(x) { try { return Show.normalise(Packs.clone(x)); } catch (e) { return null; } },
   // 3.3: the shared-library buttons a team uses that aren't in the shared library on Drive yet (made on this
@@ -3417,6 +3566,7 @@ function setShow(s) {
 async function boot() {
   UI.init();
   Edit.init();
+  Drag.init();
   Settings.init();
   Admin.init();
   applyRole();
