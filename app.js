@@ -48,7 +48,7 @@ const DEFAULTS = {
   follow: null,            // 3.1: teams shown on this device (null: decided by Drive access)
 };
 
-const APP_VERSION = '3.4.0';
+const APP_VERSION = '3.4.1';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -2976,7 +2976,7 @@ const Settings = {
     });
     $('#driveSwitch').addEventListener('click', () => {
       if (Drive.busy) return;
-      Auth.forget(); say('Opening Google sign-in…'); Auth.signIn('check', true);
+      Auth.forget(); say('Opening Google sign-in…'); Auth.signIn('switch', true);
     });
     $('#driveCheck').addEventListener('click', () => plan(() => Drive.check(say)));
     $('#driveNo').addEventListener('click', () => { $('#drivePlan').hidden = true; Drive.plan = null; });
@@ -3008,7 +3008,7 @@ const Settings = {
     const empty = !Show.uniqueSounds().some(x => Library.has(x));
     $('#driveCheck').hidden = !online;
     $('#driveCheck').textContent = empty ? 'Download all music' : 'Check for updates';
-    $('#driveSwitch').hidden = !(online && Auth.enabled() && Auth.token());
+    $('#driveSwitch').hidden = !(online && Auth.enabled()); // 3.4.1: always there, not only while a sign-in is active
     $('#driveIntroOnline').hidden = !online;
     $('#driveNotReady').hidden = online;
     applyRole();
@@ -3593,6 +3593,13 @@ async function boot() {
       else if (signin.ok && String(signin.resume).startsWith('publish:')) Settings.startPublish(signin.resume.slice(8));
       else if (signin.ok && signin.resume === 'admin-save') Admin.open(true);
       else if (signin.ok && signin.resume === 'admin') Admin.open();
+      else if (signin.ok && signin.resume === 'switch') { // 3.4.1: just switch; the role updates at the next Check for updates
+        $('#driveProgress').textContent = 'Switched Google account. Tap Check for updates to get this account’s teams, Edit and Publish.';
+        Drive.get('about', { fields: 'user(displayName,emailAddress)' }).then(r => r.json()).then(j => {
+          const u = j.user || {}, who = u.emailAddress || u.displayName;
+          if (who) $('#driveProgress').textContent = `Switched to ${who}. Tap Check for updates to get this account’s teams, Edit and Publish.`;
+        }).catch(() => {});
+      }
       else $('#driveProgress').textContent = signin.error === 'access_denied'
         ? 'Google sign-in was cancelled. Tap the button to try again.'
         : 'Google sign-in didn\'t finish. Tap the button to try again.';

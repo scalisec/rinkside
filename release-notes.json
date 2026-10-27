@@ -1,5 +1,16 @@
 [
   {
+    "version": "3.4.1",
+    "date": "2026-10-26",
+    "quiet": true,
+    "notes": [
+      {
+        "type": "improved",
+        "text": "Settings › Updates: Switch Google account is always there now, for people with more than one role. After switching, tap Check for updates to get that account's teams."
+      }
+    ]
+  },
+  {
     "version": "3.4.0",
     "date": "2026-10-25",
     "notes": [
