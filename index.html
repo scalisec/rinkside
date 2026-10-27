@@ -141,6 +141,12 @@
     <div class="setting"><span>Playlist crossfade</span><span id="xfadeLenOut" class="num"></span>
       <input id="xfadeLen" type="range" min="0" max="10" step="0.5" aria-label="Playlist crossfade"></div>
     <label class="setting"><span>Skip songs already played this game</span><input id="skipPlayed" type="checkbox"></label>
+    <label class="setting gd-setting"><span>Game Day music<br><small>How you pick the music under the Whistles on this device. Both show the same tabs and buttons.</small></span>
+      <select id="gdView" aria-label="Game Day music">
+        <option value="auto">Automatic (row on phones, list on tablets)</option>
+        <option value="row">Row of tabs</option>
+        <option value="list">List down the side</option>
+      </select></label>
     </section>
 
     <section class="spanel" id="spanel-phone" role="tabpanel" aria-labelledby="stab-phone" data-panel="phone" hidden>
@@ -243,7 +249,7 @@
       <li>At home on wifi: <b>Settings › Check for updates</b>.</li>
       <li>At the rink: connect Bluetooth first, then open the app.</li>
       <li>Tap <b>New game</b> twice to clear last game's “Played” marks.</li>
-      <li>Tap a button to play it. Tap it again to fade it out. <b>Game music</b>: each tap plays the next song.</li>
+      <li>Pick the music under the <b>Whistles</b> (In Game Action, Warmup…), then tap a button to play it. Tap it again to fade it out. <b>Game music</b>: each tap plays the next song.</li>
       <li><b>Fade out all</b> when the puck drops. <b>Stop</b> cuts everything at once.</li>
     </ol>
 
@@ -264,6 +270,8 @@
       <p><b>Settings › This device › Clean up storage</b>. It shows what it would remove before anything is deleted.</p></details>
     <details><summary>I'm my team's music volunteer. How do I change our music?</summary>
       <p>Tap <b>Check for updates</b>, then <b>Edit</b>. Tap the team button to pick the goal horn and playlists. Then <b>Settings › Publish</b> and tap <b>Publish</b> next to your team.</p></details>
+    <details><summary>Where did the tabs go?</summary>
+      <p>Everything is on <b>Game Day</b> now. GOAL!, Pregame, Game music and the Whistles stay at the top. Pick a tab right under the Whistles (a row on phones, a list on tablets) and its buttons appear. To choose the row or the list: <b>Settings › Playback › Game Day music</b>. The tabs across the top come back in <b>Edit</b>.</p></details>
     <details><summary>How do I move a button?</summary>
       <p>Tap <b>Edit</b>, then <b>press and hold</b> the button until it lifts up, and drag it to its new spot. Then <b>Settings › Publish</b> so everyone gets the new order.</p></details>
     <details><summary>I made a mess. Can I undo?</summary>

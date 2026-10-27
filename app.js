@@ -46,9 +46,11 @@ const DEFAULTS = {
   teamAccess: [],          // 3.1: teams whose Drive folder this account can see
   drivePacks: {},          // 3.1: teamId -> { id, name, modifiedTime } of the team pack last loaded or published
   follow: null,            // 3.1: teams shown on this device (null: decided by Drive access)
+  gdView: 'auto',          // 3.5: Game Day music picker: 'auto' (row on phones, list on tablets), 'row' or 'list'
+  gdTab: null,             // 3.5: the tab last picked under the Whistles on this device
 };
 
-const APP_VERSION = '3.4.1';
+const APP_VERSION = '3.5.0';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -1063,6 +1065,9 @@ const UI = {
 
   init() {
     $('#search').addEventListener('input', e => { this.query = e.target.value.trim(); this.renderMain(); });
+    // 3.5: turning a tablet (or resizing a window) can switch Game Day between the row and the list
+    let gdLast = this.gdMode();
+    addEventListener('resize', () => { const m = this.gdMode(); if (m !== gdLast) { gdLast = m; if (this.view === 'gameday' && !this.query) this.renderMain(); } });
     $('#fadeAll').addEventListener('click', () => { buzz(); fadeAll(); });
     $('#stopAll').addEventListener('click', () => { buzz(); stopAll(); });
     $('#master').value = settings.masterVolume;
@@ -1188,6 +1193,7 @@ const UI = {
   },
 
   uiAction(act, el) {
+    if (act === 'gd-pick') { settings.gdTab = el.dataset.tabId; Prefs.save(); this.renderMain(); return; }
     if (act === 'settings') Settings.open();
     if (act === 'drive') { Settings.open('updates'); setTimeout(() => { $('#driveSection').scrollIntoView({ block: 'start' }); if (Drive.ready()) $('#driveCheck').click(); }, 50); }
     if (act === 'tab-settings') Edit.tab(Show.tab(el.dataset.tabId));
@@ -1238,6 +1244,54 @@ const UI = {
     }
     if (Edit.on && (Perm.admin() || Perm.team(Teams.current?.id))) tabs.push(`<button class="tab new-tab" data-new-tab>${ICONS.plus}New tab</button>`);
     $('#tabs').innerHTML = tabs.join('');
+  },
+  /* 3.5: Game Day. GOAL!, Pregame/Game music and the Whistles stay put; under them, the music picked from
+     the tabs: a row of tabs (phones) or a list down the side (tablets), then Moments and the rest. */
+  gdMode() { const v = settings.gdView || 'auto'; return v === 'auto' ? (window.innerWidth >= 900 ? 'list' : 'row') : v; },
+  gdTabs() { return Show.visibleTabs(false); },
+  gdCurrent(tabs) { return tabs.find(t => t.id === settings.gdTab) || tabs.find(t => /warm/i.test(t.name)) || tabs[0] || null; },
+  sectionHtml(sec, extra = '') {
+    const editBtn = Edit.on && sec.editable && Perm.admin() ? `<button class="mini" data-ui="groups" data-section="${sec.key}">${ICONS.pen}Edit groups</button>` : '';
+    return `<h2 class="section-title">${esc(sec.title)}<span>${sec.items.length}</span>${editBtn}</h2>`
+      + (sec.items.length ? `<div class="grid${sec.big ? ' big' : ''}${extra}">${sec.items.map(i => this.padHtml(i)).join('')}</div>`
+        : `<p class="hint">Nothing here yet. Tap Edit groups to add some.</p>`);
+  },
+  renderGameDay(main, banner) {
+    const mode = this.gdMode();
+    const secs = gameDaySections(), wh = secs[0], rest = secs.slice(1).filter(sec => sec.items.length || (Edit.on && sec.editable));
+    const tabs = this.gdTabs(), cur = this.gdCurrent(tabs);
+    const key = mode + '|' + (cur?.id || '') + '|' + (Teams.current?.id || '');
+    const keep = {};
+    for (const sel of ['.gd-scroll', '.gd-list', '.gd-top', '.gd-chips']) { const e = main.querySelector(sel); if (e) keep[sel] = [e.scrollTop, e.scrollLeft]; }
+    const same = this._gdKey === key; this._gdKey = key;
+    const tabBtn = t => `<button class="tab" role="tab" data-ui="gd-pick" data-tab-id="${esc(t.id)}" aria-selected="${t === cur}"
+        style="--c:${esc(t.color || '#4d4d4d')};--on:${hexLight(t.color) ? '#0b131a' : '#fff'}"><i></i><span class="gd-name">${esc(t.name)}</span><em class="num">${t.items.length}</em></button>`;
+    const top = this.heroHtml() + this.sectionHtml(wh, ' whistles');
+    const music = (cur
+      ? `<h2 class="section-title gd-title">${esc(cur.name)}<span>${cur.items.length}</span></h2>`
+        + (cur.items.length ? `<div class="grid">${cur.items.map(i => this.padHtml(i)).join('')}</div>` : `<p class="hint">This tab is empty.</p>`)
+      : `<p class="hint">No music tabs yet. Tap Check for updates in Settings.</p>`)
+      + rest.map(sec => this.sectionHtml(sec)).join('');
+    let html;
+    if (mode === 'list') {
+      html = `<div class="gd-top">${top}</div>
+        <nav class="gd-list" role="tablist" aria-label="Music"><h2 class="section-title">Music<span>${tabs.length} tabs</span></h2>${tabs.map(tabBtn).join('')}</nav>
+        <div class="gd-scroll">${banner}${music}</div>`;
+    } else {
+      html = `<div class="gd-top">${top}</div>
+        <div class="gd-scroll">${banner}<div class="gd-pick"><div class="gd-chips" role="tablist" aria-label="Music">${tabs.map(tabBtn).join('')}</div></div>${music}</div>`;
+    }
+    main.classList.add('gd'); main.classList.toggle('gd-row-mode', mode !== 'list'); main.classList.toggle('gd-list-mode', mode === 'list');
+    document.body.classList.toggle('gd-list-app', mode === 'list');
+    const mt = main.scrollTop;
+    main.innerHTML = html;
+    main.scrollTop = same ? mt : 0;
+    for (const [sel, [t, l]] of Object.entries(keep)) {
+      const e = main.querySelector(sel); if (!e) continue;
+      if (same || sel === '.gd-list' || sel === '.gd-chips' || sel === '.gd-top') { e.scrollTop = t; e.scrollLeft = l; }
+    }
+    if (!same) main.querySelector('.gd-pick [aria-selected="true"], .gd-list [aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    this.refreshPads();
   },
   padHtml(item) {
     this.itemsById.set(item.id, item);
@@ -1316,6 +1370,9 @@ const UI = {
   renderMain() {
     this.itemsById.clear();
     const main = $('#main');
+    // 3.5: the tab row (and a tab on its own) is only for Edit; playing is all on Game Day
+    if (!Edit.on && this.view !== 'gameday') this.view = 'gameday';
+    if (this.query || this.view !== 'gameday') { main.classList.remove('gd', 'gd-row-mode', 'gd-list-mode'); document.body.classList.remove('gd-list-app'); }
     let html = this.banner();
     if (this.query) {
       const q = this.query.toLowerCase();
@@ -1329,15 +1386,7 @@ const UI = {
       html += `<h2 class="section-title">${hits.length} match${hits.length === 1 ? '' : 'es'} for “${esc(this.query)}”</h2>`;
       html += `<div class="grid">${hits.slice(0, 150).map(i => this.padHtml(i)).join('')}</div>`;
     } else if (this.view === 'gameday') {
-      html += this.heroHtml();
-      for (const sec of gameDaySections()) {
-        if (!sec.items.length && !(Edit.on && sec.editable)) continue;
-        const editBtn = Edit.on && sec.editable && Perm.admin() ? `<button class="mini" data-ui="groups" data-section="${sec.key}">${ICONS.pen}Edit groups</button>` : '';
-        html += `<h2 class="section-title">${esc(sec.title)}<span>${sec.items.length}</span>${editBtn}</h2>`;
-        html += sec.items.length
-          ? `<div class="grid${sec.big ? ' big' : ''}">${sec.items.map(i => this.padHtml(i)).join('')}</div>`
-          : `<p class="hint">Nothing here yet. Tap Edit groups to add some.</p>`;
-      }
+      return this.renderGameDay(main, html);
     } else {
       const vis = Show.visibleTabs();
       const tab = vis.find(t => t.id === this.view) || vis[0];
@@ -1501,6 +1550,7 @@ const Edit = {
     // leaving Edit: if anything changed, this device now has its own version of the layout
     if (!want && this.on && this._before && this._before !== JSON.stringify(show)) { settings.localEdits = true; Prefs.save(); }
     this.on = want;
+    if (!this.on) UI.view = 'gameday'; // 3.5: tabs open on their own only in Edit
     document.body.classList.toggle('editing', this.on);
     const b = $('#editBtn');
     b.setAttribute('aria-pressed', String(this.on));
@@ -2780,6 +2830,8 @@ const Settings = {
     };
     bind('fadeLen', 'fadeSeconds', 'fadeLenOut', v => v + ' s');
     bind('xfadeLen', 'playlistXfade', 'xfadeLenOut', v => v + ' s');
+    const gv = $('#gdView');
+    if (gv) { gv.value = settings.gdView || 'auto'; gv.addEventListener('change', () => { settings.gdView = gv.value; Prefs.save(); UI.renderMain(); }); }
     for (const key of ['skipPlayed']) {
       const el = $('#' + key);
       el.checked = settings[key];

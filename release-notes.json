@@ -1,5 +1,23 @@
 [
   {
+    "version": "3.5.0",
+    "date": "2026-10-27",
+    "notes": [
+      {
+        "type": "new",
+        "text": "Game Day keeps GOAL!, Pregame, Game music and the Whistles at the top. Pick the music right under them: a row of tabs on phones, a list down the side on tablets."
+      },
+      {
+        "type": "new",
+        "text": "Settings › Playback › Game Day music: choose the row or the list on this device. The app remembers the music you picked last."
+      },
+      {
+        "type": "improved",
+        "text": "The row of tabs across the top now only shows in Edit, where you add, rename and arrange tabs."
+      }
+    ]
+  },
+  {
     "version": "3.4.1",
     "date": "2026-10-26",
     "quiet": true,
