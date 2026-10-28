@@ -1,5 +1,19 @@
 [
   {
+    "version": "3.6.0",
+    "date": "2026-10-28",
+    "notes": [
+      {
+        "type": "improved",
+        "text": "Landscape view fits a 10–11\" tablet: GOAL!, Pregame, Game music and the Whistles all show without scrolling, and Now playing and Fade out all sit in one slim row at the bottom."
+      },
+      {
+        "type": "new",
+        "text": "Tab settings › Colour for new buttons: songs added to that tab from now on start with that colour. Buttons already there keep theirs."
+      }
+    ]
+  },
+  {
     "version": "3.5.1",
     "date": "2026-10-27",
     "notes": [

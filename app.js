@@ -50,7 +50,7 @@ const DEFAULTS = {
   gdTab: null,             // 3.5: the tab last picked under the Whistles on this device
 };
 
-const APP_VERSION = '3.5.1';
+const APP_VERSION = '3.6.0';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -208,6 +208,7 @@ const Show = {
     for (const [k, v] of Object.entries(hide)) if (teamIds.has(k) && Array.isArray(v)) s.hide[k] = v.filter(x => typeof x === 'string' && x.length <= 64).slice(0, 200);
     for (const tab of s.tabs) {
       tab.id = id(tab.id); tab.name = str(tab.name, 'Tab', 60); tab.color = safeColor(tab.color, null);
+        if (tab.newColor != null) tab.newColor = safeColor(tab.newColor, null); // 3.6: colour for buttons added to this tab from now on
       if (tab.team != null) { tab.team = String(tab.team).slice(0, 64); if (!teamIds.has(tab.team)) delete tab.team; }
       tab.items = (Array.isArray(tab.items) ? tab.items : []).filter(it => it && ['sound', 'playlist', 'next'].includes(it.type));
       for (const it of tab.items) {
@@ -1627,10 +1628,11 @@ const Edit = {
     this[kind](ref, true);
     $('#edBody').scrollTop = scroll;
   },
-  swatches(cur, allowNone = true) {
-    return `<div class="swatches">${allowNone ? `<button class="sw none${!cur ? ' on' : ''}" data-act="color" data-v="" aria-label="No colour">×</button>` : ''}
-      ${SWATCHES.map(c => `<button class="sw${cur === c ? ' on' : ''}" data-act="color" data-v="${c}" style="--c:${c}" aria-label="Colour ${c}"></button>`).join('')}
-      <label class="sw custom" aria-label="Custom colour"><input type="color" data-f="color" value="${esc(cur || '#3563d8')}"></label></div>`;
+  swatches(cur, allowNone = true, key = 'color') {
+    const k = key === 'color' ? '' : ` data-key="${key}"`;
+    return `<div class="swatches">${allowNone ? `<button class="sw none${!cur ? ' on' : ''}" data-act="color" data-v=""${k} aria-label="No colour">×</button>` : ''}
+      ${SWATCHES.map(c => `<button class="sw${cur === c ? ' on' : ''}" data-act="color" data-v="${c}"${k} style="--c:${c}" aria-label="Colour ${c}"></button>`).join('')}
+      <label class="sw custom" aria-label="Custom colour"><input type="color" data-f="color"${k} value="${esc(cur || '#3563d8')}"></label></div>`;
   },
   armed(b, label, fn) {
     const reset = () => { if (b.dataset.armed !== undefined) { b.textContent = b.dataset.armed; delete b.dataset.armed; b.classList.remove('warn'); } };
@@ -1756,6 +1758,8 @@ const Edit = {
     this.show('Tab settings', `
       <label class="field">Tab name<input type="text" data-f="name" value="${esc(tab.name)}"></label>
       <div class="field">Colour ${this.swatches(tab.color, false)}</div>
+      <div class="field">Colour for new buttons ${this.swatches(tab.newColor, true, 'newColor')}
+        <p class="hint">Songs added to this tab from now on start with this colour. Buttons already on the tab keep theirs. × means no colour.</p></div>
       <div class="field">Add songs to this tab
         <div class="row"><label class="mini file-btn">${ICONS.plus}Pick song files<input type="file" multiple accept="audio/*,.mp3,.m4a,.wav" data-f="addSongs"></label>
         <label class="mini file-btn">${ICONS.plus}Pick a whole folder<input type="file" webkitdirectory multiple data-f="addSongs"></label></div>
@@ -1847,7 +1851,7 @@ const Edit = {
     }
     if (f === 'plSearch') { if (!committed) $('#plPick').innerHTML = this.pickList(ref, el.value); return; }
     if (f === 'name' || f === 'full') { ref[f] = el.value; Show.save(); return; }
-    if (f === 'color') { ref.color = safeColor(el.value, ref.color); Show.save(); if (kind === 'team') Teams.apply(); return; }
+    if (f === 'color') { const key = el.dataset.key === 'newColor' ? 'newColor' : 'color'; ref[key] = safeColor(el.value, ref[key] || null); Show.save(); if (kind === 'team') Teams.apply(); return; }
     if (f === 'start' || f === 'stop') { if (committed) { ref[f] = Math.max(0, Math.round((+el.value || 0) * 100) / 100); Show.save(); } return; }
     if (f === 'volume') { ref.volume = +el.value; $('#edVol').textContent = Math.round(ref.volume * 100) + '%'; tracks.filter(t => t.sound === ref).forEach(t => t.setUserVol(t.userVol)); Show.save(); return; }
     if (!committed) return;
@@ -1885,7 +1889,9 @@ const Edit = {
     const move = (arr, i, d) => { const j = i + d; if (i < 0 || j < 0 || j >= arr.length) return false; [arr[i], arr[j]] = [arr[j], arr[i]]; return true; };
 
     if (act === 'color') {
-      ref.color = safeColor(b.dataset.v, null);
+      const key = b.dataset.key === 'newColor' ? 'newColor' : 'color';
+      ref[key] = safeColor(b.dataset.v, null);
+      if (key === 'newColor' && !ref.newColor) delete ref.newColor;
       Show.save(); this.rerender();
       if (kind === 'team') { Teams.apply(); UI.renderHead(); }
     } else if (act === 'listen' || act === 'listenTop') {
@@ -1977,7 +1983,7 @@ const Edit = {
     for (const { file } of added) {
       tab.items.push({
         type: 'sound', id: uid(), name: prettyName(file.name), file: file.webkitRelativePath || file.name,
-        start: 0, stop: 0, volume: 1, length: await probeDuration(file), color: null,
+        start: 0, stop: 0, volume: 1, length: await probeDuration(file), color: tab.newColor || null,
       });
     }
     if (input) input.value = '';
@@ -2282,7 +2288,7 @@ const Drive = {
       }
       let length = 0;
       try { const blob = await Library.blobByKey(Library.byTail.get(norm(f.path).split('/').slice(-2).join('/'))); if (blob) length = await probeDuration(blob); } catch (e) {}
-      tab.items.push({ type: 'sound', id: uid(), name: prettyName(parts[parts.length - 1]), file: parts.slice(-2).join('/'), start: 0, stop: 0, volume: 1, length, color: null });
+      tab.items.push({ type: 'sound', id: uid(), name: prettyName(parts[parts.length - 1]), file: parts.slice(-2).join('/'), start: 0, stop: 0, volume: 1, length, color: tab.newColor || null });
       made.push({ name: prettyName(parts[parts.length - 1]), tab: tab.name });
     }
     if (made.length) { Show.changed(); settings.localEdits = true; Prefs.save(); await Store.put('kv', 'show', show).catch(() => {}); }
@@ -2695,6 +2701,7 @@ const Diff = {
       if (!o) out.push(`New tab “${t.name}”`);
       else if (o.name !== t.name) out.push(`Renamed tab “${o.name}” to “${t.name}”`);
       else if (o.color !== t.color) out.push(`Changed the colour of tab “${t.name}”`);
+      else if ((o.newColor || null) !== (t.newColor || null)) out.push(`Changed the colour for new buttons on tab “${t.name}”`);
     }
     for (const t of before.tabs) if (!tabsA.has(t.id)) out.push(`Deleted tab “${t.name}”`);
     const items = s => { const m = new Map(); for (const t of s.tabs) for (const it of t.items) m.set(it.id, { it, tab: t.name }); return m; };

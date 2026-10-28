@@ -873,3 +873,52 @@ body.gd-list-app .dock-actions { padding: 8px 12px calc(8px + env(safe-area-inse
   body:has(.main.gd-row-mode) .dock-actions { padding-top: 6px; }
   body:has(.main.gd-row-mode) .fade-all { min-height: 52px; }
 }
+
+/* ---------- 3.6: Landscape fits a 10-11" tablet without scrolling the left column ---------- */
+/* one header row: Change view becomes an icon until the screen is wide enough for its words */
+@media (max-width: 1399px) {
+  body.gd-list-app .view-btn span { display: none; }
+  body.gd-list-app .view-btn { width: 44px; padding: 0; }
+}
+@media (max-width: 1299px) {
+  body.gd-list-app .lock span, body.gd-list-app .edit-toggle span { display: none; }
+  body.gd-list-app .lock, body.gd-list-app .edit-toggle { width: 44px; padding: 0; }
+}
+/* Now playing, the volume and Fade out all on one slim row; playing sounds as one-line cards under it */
+body.gd-list-app .dock { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 460px); grid-template-areas: "head actions" "list list"; }
+body.gd-list-app .dock-head { grid-area: head; border-bottom: 0; padding: 10px 14px; }
+body.gd-list-app .dock-actions { grid-area: actions; border-top: 0; padding: 8px 12px; }
+body.gd-list-app .fade-all { min-height: 54px; font-size: 22px; }
+body.gd-list-app .stop-all { min-height: 54px; }
+body.gd-list-app .dock-list { grid-area: list; max-height: 104px; overflow-y: auto; border-top: 1px solid var(--line-solid); gap: 6px; padding: 6px 12px; }
+body.gd-list-app .card { grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; padding: 7px 10px; align-items: center; }
+body.gd-list-app .card-top { grid-column: 1; align-items: center; }
+body.gd-list-app .card-top .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 17px; }
+body.gd-list-app .card-top .t b, body.gd-list-app .card-top .t small { display: none; }
+body.gd-list-app .card.lead .remain { font-size: 26px; }
+body.gd-list-app .bar { grid-column: 1; height: 4px; }
+body.gd-list-app .card-row { grid-column: 2; grid-row: 1 / span 2; }
+body.gd-list-app .card-row input[type=range] { width: 140px; flex: none; }
+body.gd-list-app .card.pl { grid-template-columns: minmax(0, 1fr) auto; }
+body.gd-list-app .card.pl .upnext { display: none; }
+body.gd-list-app .pl-actions .mini { min-height: 36px; padding: 5px 9px; }
+/* the left column stretches or shrinks its buttons to exactly fill the height it has */
+.gd-list-mode .gd-top { container-type: size; display: flex; flex-direction: column; padding-top: 12px; padding-bottom: 12px; }
+.gd-list-mode .gd-top .hero { flex: 5 1 0; min-height: 0; grid-template-rows: minmax(0, 1.25fr) minmax(0, 1fr); gap: 10px; }
+.gd-list-mode .gd-top .hero-pad { min-height: 0; padding: clamp(8px, 2cqh, 14px) 14px; }
+.gd-list-mode .gd-top .hero-big { font-size: clamp(30px, 10cqh, 64px); }
+.gd-list-mode .gd-top .hero-pad.pl .hero-big { font-size: clamp(22px, 6cqh, 36px); }
+.gd-list-mode .gd-top .hero-logo, .gd-list-mode .gd-top .hero-logo.round, .gd-list-mode .gd-top .hero-logo.square { width: clamp(56px, 20cqh, 150px); height: clamp(56px, 20cqh, 150px); }
+.gd-list-mode .gd-top > .section-title { flex: none; margin: 10px 0 8px; }
+.gd-list-mode .gd-top .grid.whistles { flex: 4 1 0; min-height: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); gap: 8px; }
+.gd-list-mode .gd-top .grid.whistles .pad { min-height: 0; padding: clamp(6px, 1.6cqh, 12px) 10px; }
+.gd-list-mode .gd-top .grid.whistles .pad .name { font-size: clamp(16px, 4cqh, 26px); line-height: 1.05; }
+.gd-list-mode .gd-top > .hint { flex: none; }
+@container (max-height: 560px) {
+  .gd-list-mode .gd-top .grid.whistles .pad .eyebrow, .gd-list-mode .gd-top .grid.whistles .pad .dots { display: none; }
+  .gd-list-mode .gd-top .hero-sub { font-size: 12px; }
+}
+@container (max-height: 420px) {
+  .gd-list-mode .gd-top .hero-k { font-size: 11px; }
+  .gd-list-mode .gd-top .hero-pad.pl .hero-sub { display: none; }
+}
