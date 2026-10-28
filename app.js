@@ -1067,7 +1067,7 @@ const UI = {
     $('#search').addEventListener('input', e => { this.query = e.target.value.trim(); this.renderMain(); });
     // 3.5: turning a tablet (or resizing a window) can switch Game Day between the row and the list
     let gdLast = this.gdMode();
-    addEventListener('resize', () => { const m = this.gdMode(); if (m !== gdLast) { gdLast = m; if (this.view === 'gameday' && !this.query) this.renderMain(); } });
+    addEventListener('resize', () => { const m = this.gdMode(); if (m !== gdLast) { gdLast = m; if (!this.query) { this.renderTabs(); this.renderMain(); } } });
     $('#fadeAll').addEventListener('click', () => { buzz(); fadeAll(); });
     $('#stopAll').addEventListener('click', () => { buzz(); stopAll(); });
     $('#master').value = settings.masterVolume;
@@ -1247,7 +1247,7 @@ const UI = {
   },
   /* 3.5: Game Day. GOAL!, Pregame/Game music and the Whistles stay put; under them, the music picked from
      the tabs: a row of tabs (phones) or a list down the side (tablets), then Moments and the rest. */
-  gdMode() { const v = settings.gdView || 'auto'; return v === 'auto' ? (window.innerWidth >= 900 ? 'list' : 'row') : v; },
+  gdMode() { const v = settings.gdView || 'auto'; return v === 'auto' ? (window.innerWidth >= 900 ? 'list' : 'row') : v; }, // 'row' | 'list' | 'classic'
   gdTabs() { return Show.visibleTabs(false); },
   gdCurrent(tabs) { return tabs.find(t => t.id === settings.gdTab) || tabs.find(t => /warm/i.test(t.name)) || tabs[0] || null; },
   sectionHtml(sec, extra = '') {
@@ -1371,8 +1371,10 @@ const UI = {
     this.itemsById.clear();
     const main = $('#main');
     // 3.5: the tab row (and a tab on its own) is only for Edit; playing is all on Game Day
-    if (!Edit.on && this.view !== 'gameday') this.view = 'gameday';
-    if (this.query || this.view !== 'gameday') { main.classList.remove('gd', 'gd-row-mode', 'gd-list-mode'); document.body.classList.remove('gd-list-app'); }
+    const classic = this.gdMode() === 'classic'; // 3.5: Classic = the 3.4 Game Day, tab row always shown
+    document.body.classList.toggle('gd-classic', classic);
+    if (!Edit.on && !classic && this.view !== 'gameday') this.view = 'gameday';
+    if (this.query || this.view !== 'gameday' || classic) { main.classList.remove('gd', 'gd-row-mode', 'gd-list-mode'); document.body.classList.remove('gd-list-app'); }
     let html = this.banner();
     if (this.query) {
       const q = this.query.toLowerCase();
@@ -1385,8 +1387,14 @@ const UI = {
       }
       html += `<h2 class="section-title">${hits.length} match${hits.length === 1 ? '' : 'es'} for “${esc(this.query)}”</h2>`;
       html += `<div class="grid">${hits.slice(0, 150).map(i => this.padHtml(i)).join('')}</div>`;
-    } else if (this.view === 'gameday') {
+    } else if (this.view === 'gameday' && !classic) {
       return this.renderGameDay(main, html);
+    } else if (this.view === 'gameday') {
+      html += this.heroHtml();
+      for (const sec of gameDaySections()) {
+        if (!sec.items.length && !(Edit.on && sec.editable)) continue;
+        html += this.sectionHtml(sec);
+      }
     } else {
       const vis = Show.visibleTabs();
       const tab = vis.find(t => t.id === this.view) || vis[0];
@@ -1550,7 +1558,7 @@ const Edit = {
     // leaving Edit: if anything changed, this device now has its own version of the layout
     if (!want && this.on && this._before && this._before !== JSON.stringify(show)) { settings.localEdits = true; Prefs.save(); }
     this.on = want;
-    if (!this.on) UI.view = 'gameday'; // 3.5: tabs open on their own only in Edit
+    if (!this.on && UI.gdMode() !== 'classic') UI.view = 'gameday'; // 3.5: tabs open on their own only in Edit (not in Classic)
     document.body.classList.toggle('editing', this.on);
     const b = $('#editBtn');
     b.setAttribute('aria-pressed', String(this.on));
@@ -2831,7 +2839,7 @@ const Settings = {
     bind('fadeLen', 'fadeSeconds', 'fadeLenOut', v => v + ' s');
     bind('xfadeLen', 'playlistXfade', 'xfadeLenOut', v => v + ' s');
     const gv = $('#gdView');
-    if (gv) { gv.value = settings.gdView || 'auto'; gv.addEventListener('change', () => { settings.gdView = gv.value; Prefs.save(); UI.renderMain(); }); }
+    if (gv) { gv.value = settings.gdView || 'auto'; gv.addEventListener('change', () => { settings.gdView = gv.value; Prefs.save(); UI.renderTabs(); UI.renderMain(); }); }
     for (const key of ['skipPlayed']) {
       const el = $('#' + key);
       el.checked = settings[key];

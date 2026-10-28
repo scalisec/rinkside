@@ -798,7 +798,7 @@ body.drag-active { -webkit-user-select: none; user-select: none; cursor: grabbin
 .drag-hint { margin-top: 10px; }
 
 /* ---------- 3.5: Game Day with a fixed top and the music picked under the Whistles ---------- */
-body:not(.editing) #tabs { display: none; } /* the tab row is for Edit; playing happens on Game Day */
+body:not(.editing):not(.gd-classic) #tabs { display: none; } /* the tab row is for Edit (and Classic); playing happens on Game Day */
 .gd-setting { grid-template-columns: 1fr; }
 .gd-setting small { color: var(--muted); font-size: 13px; }
 .gd-setting select { background: var(--raised); color: var(--text); border: 1px solid var(--line-solid); border-radius: 8px; padding: 9px 10px; min-height: 44px; width: 100%; }
