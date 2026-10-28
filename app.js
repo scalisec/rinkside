@@ -50,7 +50,7 @@ const DEFAULTS = {
   gdTab: null,             // 3.5: the tab last picked under the Whistles on this device
 };
 
-const APP_VERSION = '3.5.0';
+const APP_VERSION = '3.5.1';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -1083,6 +1083,7 @@ const UI = {
     // Team picker: one button showing the current team; tap it for a list of all teams.
     // In Edit, the list opens a team's settings instead, and has "Add a team".
     $('#teams').addEventListener('click', () => this.teamMenu(true));
+    $('#viewBtn').addEventListener('click', () => this.viewMenu(true));
 
     const ng = $('#newGame');
     ng.addEventListener('click', () => {
@@ -1206,6 +1207,7 @@ const UI = {
   },
 
   setLocked(on, quiet = false) {
+    if (on) this.viewMenu(false);
     settings.locked = on; Prefs.save();
     if (on && Edit.on) Edit.toggle(false);
     document.body.classList.toggle('locked', on);
@@ -1535,6 +1537,36 @@ const UI = {
       settings.team = id; Prefs.save();
       Teams.apply(); this.renderHead(); this.renderTabs(); this.renderMain(); this.renderDock();
       this.toast(`${Teams.current.full} selected.`);
+    });
+    (m.querySelector('.trow.on') || m.querySelector('.trow'))?.focus();
+  },
+  // 3.5.1: Change view (next to Lock): Classic, Portrait (row of tabs), Landscape (list down the side), Default
+  viewMenu(open) {
+    document.querySelector('.tmenu')?.remove(); document.querySelector('.tscrim')?.remove();
+    const btn = $('#viewBtn');
+    btn.setAttribute('aria-expanded', String(!!open));
+    if (!open) return;
+    const r = btn.getBoundingClientRect();
+    const scrim = Object.assign(document.createElement('div'), { className: 'tscrim' });
+    const m = document.createElement('div');
+    m.className = 'tmenu view-menu'; m.setAttribute('role', 'menu'); m.setAttribute('aria-label', 'Change view');
+    m.style.left = Math.max(8, Math.min(r.right - 290, innerWidth - 298)) + 'px';
+    m.style.top = (r.bottom + 6) + 'px';
+    const cur = settings.gdView || 'auto';
+    const opts = [['classic', 'Classic', 'Tabs across the top, Game Day as one long page'], ['row', 'Portrait', 'A row of tabs under the Whistles'],
+      ['list', 'Landscape', 'A list of tabs down the side'], ['auto', 'Default', 'Portrait on phones, Landscape on tablets']];
+    m.innerHTML = '<h4>Change view</h4>' + opts.map(([v, name, sub]) => `<button class="trow${v === cur ? ' on' : ''}" role="menuitemradio" aria-checked="${v === cur}" data-view="${v}">
+        <span>${name}<small>${sub}</small></span>${v === cur ? '<span class="tick">✓</span>' : ''}</button>`).join('');
+    document.body.append(scrim, m);
+    const close = () => { this.viewMenu(false); btn.focus(); };
+    scrim.addEventListener('click', close);
+    m.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+    m.addEventListener('click', e => {
+      const row = e.target.closest('[data-view]'); if (!row) return;
+      this.viewMenu(false);
+      settings.gdView = row.dataset.view; Prefs.save();
+      this.renderTabs(); this.renderMain();
+      this.toast(`${opts.find(o => o[0] === row.dataset.view)[1]} view.`);
     });
     (m.querySelector('.trow.on') || m.querySelector('.trow'))?.focus();
   },

@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.5.1",
+    "date": "2026-10-27",
+    "notes": [
+      {
+        "type": "improved",
+        "text": "Change view is now a button next to Lock: Classic, Portrait (a row of tabs), Landscape (a list down the side) or Default (Portrait on phones, Landscape on tablets). It's hidden while the app is locked."
+      }
+    ]
+  },
+  {
     "version": "3.5.0",
     "date": "2026-10-27",
     "notes": [

@@ -32,6 +32,7 @@
     <button id="settingsBtn" class="btn icon admin" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <button id="fullBtn" class="btn icon" aria-pressed="false" aria-label="Full screen" title="Full screen" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     <button id="helpBtn" class="btn icon" aria-label="Help" title="Help"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/></svg></button>
+    <button id="viewBtn" class="btn admin view-btn" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M10 10v10"/></svg><span>Change view</span></button>
     <button id="lockBtn" class="btn lock" aria-pressed="false" aria-label="Lock controls for volunteers"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span>Lock</span></button>
   </header>
 
@@ -141,13 +142,6 @@
     <div class="setting"><span>Playlist crossfade</span><span id="xfadeLenOut" class="num"></span>
       <input id="xfadeLen" type="range" min="0" max="10" step="0.5" aria-label="Playlist crossfade"></div>
     <label class="setting"><span>Skip songs already played this game</span><input id="skipPlayed" type="checkbox"></label>
-    <label class="setting gd-setting"><span>Game Day music<br><small>How you pick the music under the Whistles on this device. All of these show the same tabs and buttons.</small></span>
-      <select id="gdView" aria-label="Game Day music">
-        <option value="auto">Automatic (row on phones, list on tablets)</option>
-        <option value="row">Row of tabs</option>
-        <option value="list">List down the side</option>
-        <option value="classic">Classic (the Game Day from before 3.5, tabs across the top)</option>
-      </select></label>
     </section>
 
     <section class="spanel" id="spanel-phone" role="tabpanel" aria-labelledby="stab-phone" data-panel="phone" hidden>
@@ -272,7 +266,7 @@
     <details><summary>I'm my team's music volunteer. How do I change our music?</summary>
       <p>Tap <b>Check for updates</b>, then <b>Edit</b>. Tap the team button to pick the goal horn and playlists. Then <b>Settings › Publish</b> and tap <b>Publish</b> next to your team.</p></details>
     <details><summary>Where did the tabs go?</summary>
-      <p>Everything is on <b>Game Day</b> now. GOAL!, Pregame, Game music and the Whistles stay at the top. Pick a tab right under the Whistles (a row on phones, a list on tablets) and its buttons appear. To choose the row or the list: <b>Settings › Playback › Game Day music</b>. The tabs across the top come back in <b>Edit</b>. Prefer the old screen? Pick <b>Classic</b> there.</p></details>
+      <p>Everything is on <b>Game Day</b> now. GOAL!, Pregame, Game music and the Whistles stay at the top. Pick a tab right under the Whistles (a row on phones, a list on tablets) and its buttons appear. To switch, tap <b>Change view</b> next to the lock: <b>Classic</b> (the old screen), <b>Portrait</b> (row), <b>Landscape</b> (list) or <b>Default</b>. The tabs across the top come back in <b>Edit</b>.</p></details>
     <details><summary>How do I move a button?</summary>
       <p>Tap <b>Edit</b>, then <b>press and hold</b> the button until it lifts up, and drag it to its new spot. Then <b>Settings › Publish</b> so everyone gets the new order.</p></details>
     <details><summary>I made a mess. Can I undo?</summary>

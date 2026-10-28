@@ -519,6 +519,8 @@ dialog.help { width: min(720px, calc(100% - 32px)); }
   .seg button { padding: 8px 11px; }
   .btn { padding: 8px 13px; }
   .lock span { display: none; }
+  .view-btn span { display: none; }
+  .view-btn { width: 44px; padding: 0; }
   .edit-toggle span { display: none; }
   .edit-toggle { width: 44px; padding: 0; }
   .grp-row { grid-template-columns: 1fr 1fr; }
