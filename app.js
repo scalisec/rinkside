@@ -50,7 +50,7 @@ const DEFAULTS = {
   gdTab: null,             // 3.5: the tab last picked under the Whistles on this device
 };
 
-const APP_VERSION = '3.6.0';
+const APP_VERSION = '3.7.0';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -803,7 +803,7 @@ class Track {
     this.preview = !!opts.preview;
     this.uid = ++trackSeq;
     this.userVol = 1;
-    this.state = 'loading'; // loading | playing | fading | done
+    this.state = 'loading'; // loading | playing | paused | fading | done
   }
   get level() { return (this.sound.volume ?? 1) * this.userVol; }
   get end() {
@@ -813,6 +813,7 @@ class Track {
     return this.sound.stop && this.sound.stop < len ? this.sound.stop : len;
   }
   get time() {
+    if (this.state === 'paused' && this.pausedAt != null) return this.pausedAt;
     if (this.el) return this.el.currentTime;
     if (this.src) return this.offset + (ctx.currentTime - this.t0);
     return this.sound.start || 0;
@@ -838,6 +839,39 @@ class Track {
     if (this.state === 'done') { this._teardown(); return; }
     this.state = 'playing';
     if (fadeIn) ramp(this.gain.gain, this.level, fadeIn);
+    if (this._pauseOnStart) { this._pauseOnStart = false; this.pause(); } // Pause was tapped while it was loading
+  }
+  // 3.7: Pause holds the song where it is (after a quick fade); Resume carries on from the same spot
+  pause(secs = 0.25) {
+    if (this.state === 'loading') { this._pauseOnStart = true; return; }
+    if (this.state !== 'playing') return;
+    this.state = 'paused';
+    this.pausedAt = Math.min(this.end, this.time + secs);
+    ramp(this.gain.gain, 0, secs);
+    clearTimeout(this._pauseTimer);
+    this._pauseTimer = setTimeout(() => {
+      if (this.state !== 'paused') return;
+      if (this.el) { try { this.el.pause(); this.pausedAt = this.el.currentTime; } catch (e) {} }
+      else if (this.src) { try { this.src.onended = null; this.src.stop(); this.src.disconnect(); } catch (e) {} this.src = null; }
+    }, secs * 1000 + 20);
+  }
+  async resume(secs = 0.25) {
+    if (this.state !== 'paused') return;
+    clearTimeout(this._pauseTimer);
+    const at = this.pausedAt;
+    this.state = 'playing';
+    this.pausedAt = null;
+    try {
+      if (this.el) { if (this.el.paused) await this.el.play(); }
+      else if (!this.src && this.buffer) {
+        const src = ctx.createBufferSource();
+        src.buffer = this.buffer; src.connect(this.gain);
+        this.offset = at; this.t0 = ctx.currentTime;
+        src.onended = () => this.stop();
+        src.start(0, at); this.src = src;
+      }
+    } catch (e) { console.error(e); this.stop(); return; }
+    ramp(this.gain.gain, this.level, secs);
   }
   async _startElement() {
     const url = await urlFor(this.sound);
@@ -894,6 +928,7 @@ class Track {
   }
   fadeOut(secs = settings.fadeSeconds) {
     if (this.state === 'done' || this.state === 'fading') return;
+    if (this.state === 'paused') { this.stop(); return; } // already silent
     if (this.state === 'loading' || !this.gain) { this.stop(); return; }
     this.state = 'fading';
     ramp(this.gain.gain, 0, secs);
@@ -904,7 +939,7 @@ class Track {
   stop() {
     if (this.state === 'done') return;
     this.state = 'done';
-    clearTimeout(this._fadeTimer);
+    clearTimeout(this._fadeTimer); clearTimeout(this._pauseTimer);
     this._teardown();
     const i = tracks.indexOf(this);
     if (i >= 0) tracks.splice(i, 1);
@@ -922,8 +957,22 @@ class Track {
 }
 
 function markPlayed(sound) { played.add(keyOf(sound)); Prefs.savePlayed(); }
-function fadeAll(secs = settings.fadeSeconds, except = null) { for (const t of [...tracks]) if (t !== except) t.fadeOut(secs); }
+function fadeAll(secs = settings.fadeSeconds, except = null, keepPaused = false) { for (const t of [...tracks]) if (t !== except && !(keepPaused && t.state === 'paused')) t.fadeOut(secs); }
 function stopAll() { for (const t of [...tracks]) t.stop(); }
+// 3.7: Pause / Resume everything. While paused, a whistle or any other button still plays; the paused
+// sounds wait until Resume (which, in One-at-a-time, fades out whatever was started meanwhile).
+const isPaused = () => tracks.some(t => t.state === 'paused' || t._pauseOnStart);
+function pauseAll() {
+  for (const t of [...tracks]) { if (t.state === 'fading') t.stop(); else t.pause(); }
+  UI.renderDock(); UI.refreshPads();
+}
+function resumeAll() {
+  const held = tracks.filter(t => t.state === 'paused' || t._pauseOnStart);
+  if (settings.oneAtATime) for (const t of [...tracks]) if (!held.includes(t)) t.fadeOut(0.4);
+  for (const t of held) { t._pauseOnStart = false; t.resume(); }
+  UI.renderDock(); UI.refreshPads();
+}
+function togglePause() { if (isPaused()) resumeAll(); else if (tracks.some(t => t.state === 'playing' || t.state === 'loading')) pauseAll(); }
 
 async function playSound(sound, { preview = false } = {}) {
   if (!Library.has(sound)) {
@@ -931,9 +980,10 @@ async function playSound(sound, { preview = false } = {}) {
     return null;
   }
   const live = tracks.find(t => t.sound.id === sound.id && !t.playlist && t.state !== 'fading');
+  if (live && !preview && live.state === 'paused') { resumeAll(); return null; } // tapping a paused sound carries on
   if (live && !preview) { live.fadeOut(); return null; }
   if (live && preview) live.stop();
-  if (settings.oneAtATime || preview) fadeAll();
+  if (settings.oneAtATime || preview) fadeAll(settings.fadeSeconds, null, !preview); // paused sounds stay on hold
   const t = new Track(sound, null, { preview });
   tracks.push(t);
   UI.renderDock();
@@ -1006,7 +1056,7 @@ async function playlistNext({ auto = false } = {}) {
   A.track = t;
   tracks.push(t);
   if (auto && old) old.fadeOut(settings.playlistXfade);
-  else if (settings.oneAtATime) fadeAll(settings.fadeSeconds, t);
+  else if (settings.oneAtATime) { old?.fadeOut(); fadeAll(settings.fadeSeconds, t, true); }
   else old?.fadeOut();
   UI.renderDock();
   try {
@@ -1023,7 +1073,7 @@ async function playlistNext({ auto = false } = {}) {
 // one loop keeps stop points, playlist crossfades and progress displays in step
 function tick() {
   for (const t of [...tracks]) {
-    if (t.state === 'loading' || t.state === 'done') continue;
+    if (t.state === 'loading' || t.state === 'done' || t.state === 'paused') continue;
     const remaining = t.end - t.time;
     if (remaining <= 0.05) { t.stop(); continue; }
     if (t.playlist && t.playlist === activePL && t.playlist.track === t && settings.playlistAuto &&
@@ -1049,6 +1099,8 @@ function splitName(name) {
 }
 
 const ICONS = {
+  pause: '<svg viewBox="0 0 24 24" aria-hidden="true" class="solid"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>',
+  resume: '<svg viewBox="0 0 24 24" aria-hidden="true" class="solid"><path d="M7 5v14l12-7z"/></svg>',
   shuffle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>',
   list: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h13M3 12h13M3 18h9M19 14v7l-3-2"/></svg>',
   next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l10 7-10 7zM19 5v14"/></svg>',
@@ -1071,6 +1123,7 @@ const UI = {
     addEventListener('resize', () => { const m = this.gdMode(); if (m !== gdLast) { gdLast = m; if (!this.query) { this.renderTabs(); this.renderMain(); } } });
     $('#fadeAll').addEventListener('click', () => { buzz(); fadeAll(); });
     $('#stopAll').addEventListener('click', () => { buzz(); stopAll(); });
+    $('#pauseAll').addEventListener('click', () => { buzz(); togglePause(); });
     $('#master').value = settings.masterVolume;
     $('#master').addEventListener('input', e => {
       settings.masterVolume = +e.target.value; Prefs.save();
@@ -1472,8 +1525,8 @@ const UI = {
     const n = splitName(t.sound.name);
     const tab = idx.tabOf.get(t.sound.id);
     const sw = t.sound.color || tab?.color || 'var(--raised)';
-    const status = t.state === 'loading' ? 'Loading…' : t.state === 'fading' ? 'Fading out' : t.preview ? 'Preview' : (sub || tab?.name || '');
-    return `<div class="card${t.state === 'fading' ? ' fading' : ''}${lead ? ' lead' : ''}" data-uid="${t.uid}" style="--c:${esc(sw)}">
+    const status = t.state === 'loading' ? 'Loading…' : t.state === 'fading' ? 'Fading out' : t.state === 'paused' ? 'Paused' : t.preview ? 'Preview' : (sub || tab?.name || '');
+    return `<div class="card${t.state === 'fading' ? ' fading' : ''}${t.state === 'paused' ? ' paused' : ''}${lead ? ' lead' : ''}" data-uid="${t.uid}" style="--c:${esc(sw)}">
       <div class="card-top">
         <span class="t">${n.eyebrow ? `<b>${esc(n.eyebrow)}</b>` : ''}${esc(n.title)}<small>${esc(n.artist ? n.artist + ' · ' : '')}${esc(status)}</small></span>
         <span class="remain num">-${fmt(t.end - t.time)}</span></div>
@@ -1492,7 +1545,7 @@ const UI = {
       const cur = A.track && A.track.state !== 'done' ? A.track : null;
       const upNext = A.order.find((s, i) => i > A.pos && Library.has(s) && (!settings.skipPlayed || !played.has(keyOf(s))));
       html += `<div class="card pl" data-pl="${esc(A.pl.id)}">
-        <div class="card-top"><span class="t"><b>Playlist</b>${esc(A.pl.name)}<small>${cur ? `Song ${A.pos + 1} of ${A.order.length}` : 'Paused. Next song picks up where it left off.'}</small></span></div>
+        <div class="card-top"><span class="t"><b>Playlist</b>${esc(A.pl.name)}<small>${cur ? `Song ${A.pos + 1} of ${A.order.length}` : 'Faded out. Next song picks up where it left off.'}</small></span></div>
         ${upNext ? `<div class="upnext"><span>Up next</span>${esc(splitName(upNext.name).title)}</div>` : ''}
         <div class="pl-actions">
           <button class="mini primary" data-act="next">${ICONS.next}Next song</button>
@@ -1504,6 +1557,16 @@ const UI = {
     if (!html) html = `<div class="empty">${Teams.badge(Teams.current, 'empty-logo')}<span>Quiet. Tap a button to start a sound.</span></div>`;
     list.innerHTML = html;
     document.body.classList.toggle('has-audio', visible.length > 0);
+    // 3.7: Pause / Resume: greyed out when nothing is playing
+    const pb = $('#pauseAll');
+    if (pb) {
+      const paused = isPaused(), live = tracks.some(t => t.state === 'playing' || t.state === 'loading');
+      pb.disabled = !paused && !live;
+      pb.classList.toggle('on', paused);
+      pb.setAttribute('aria-label', paused ? 'Resume' : 'Pause');
+      pb.title = paused ? 'Resume' : 'Pause';
+      pb.innerHTML = paused ? `${ICONS.resume}<span>Resume</span>` : `${ICONS.pause}<span>Pause</span>`;
+    }
     this.updateProgress();
   },
   teamMenu(open) {

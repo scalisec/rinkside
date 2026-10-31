@@ -922,3 +922,22 @@ body.gd-list-app .pl-actions .mini { min-height: 36px; padding: 5px 9px; }
   .gd-list-mode .gd-top .hero-k { font-size: 11px; }
   .gd-list-mode .gd-top .hero-pad.pl .hero-sub { display: none; }
 }
+
+/* ---------- 3.7: Pause / Resume between Fade out all and Stop ---------- */
+.dock-actions { grid-template-columns: 1fr auto auto; }
+.pause-all {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-width: 108px; padding: 0 14px; border-radius: var(--radius);
+  border: 2px solid var(--warn, #f2c14e); background: color-mix(in srgb, #f2c14e 14%, var(--bg)); color: #f2c14e;
+  font: 700 18px/1 var(--display); letter-spacing: .06em; text-transform: uppercase;
+}
+.pause-all svg.solid { width: 22px; height: 22px; fill: currentColor; stroke: none; }
+.pause-all.on { background: #f2c14e; color: #0b131a; }
+.pause-all:disabled { border-color: var(--line-solid); background: transparent; color: var(--muted); opacity: .55; }
+.card.paused { border-left-color: #f2c14e; }
+.card.paused .remain { color: #f2c14e; }
+.card.paused .remain::before { content: "Paused  "; font: 700 12px/1 var(--body); letter-spacing: .08em; text-transform: uppercase; vertical-align: middle; }
+@media (max-width: 560px) {
+  .pause-all { min-width: 0; width: 60px; padding: 0; }
+  .pause-all span { display: none; }
+}

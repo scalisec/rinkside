@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.7.0",
+    "date": "2026-10-31",
+    "notes": [
+      {
+        "type": "new",
+        "text": "Pause, between Fade out all and Stop: holds everything that's playing (with a quick fade). Whistles still play while paused. Tap Resume to carry on from the same spot. It's greyed out when nothing is playing."
+      }
+    ]
+  },
+  {
     "version": "3.6.0",
     "date": "2026-10-28",
     "notes": [
