@@ -941,3 +941,33 @@ body.gd-list-app .pl-actions .mini { min-height: 36px; padding: 5px 9px; }
   .pause-all { min-width: 0; width: 60px; padding: 0; }
   .pause-all span { display: none; }
 }
+
+/* 3.8: Even out volume */
+.setting small { color: var(--muted); font-size: 13px; line-height: 1.35; }
+.level-row { border-top: 1px solid var(--line-solid); margin-top: 8px; padding-top: 8px; }
+.level-box { display: grid; gap: 6px; }
+.level-box .hint { margin: 0; }
+.mini.check { gap: 8px; cursor: pointer; }
+.mini.check input { width: 18px; height: 18px; margin: 0; accent-color: var(--live); }
+.mini:disabled { opacity: .5; }
+.steps-mini { margin: 0 0 10px; padding-left: 22px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.lvl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 10px 0 6px; }
+.lvl-key { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.lvl-key b { width: 2px; height: 14px; background: var(--text); }
+.lvl-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.lvl-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(70px, 1fr) minmax(0, 1.3fr); align-items: center; gap: 10px;
+  background: var(--bg); border: 1px solid var(--line-solid); border-radius: 8px; padding: 6px 10px; }
+.lvl-row.none { opacity: .7; }
+.lvl-pick { display: flex; align-items: center; gap: 10px; min-width: 0; cursor: pointer; min-height: 32px; }
+.lvl-pick input { width: 20px; height: 20px; margin: 0; flex: none; accent-color: var(--live); }
+.lvl-name { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.lvl-name small { color: var(--muted); font-weight: 400; }
+.lvl-bar { position: relative; height: 8px; border-radius: 4px; background: var(--line-solid); }
+.lvl-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
+.lvl-bar b { position: absolute; top: -4px; width: 2px; height: 16px; background: var(--text); }
+.lvl-fix { font-size: 13px; color: var(--muted); }
+.lvl-apply { position: sticky; bottom: 0; background: var(--panel); padding: 10px 0 2px; margin-top: 8px; }
+@media (max-width: 560px) {
+  .lvl-row { grid-template-columns: minmax(0, 1fr) 80px; }
+  .lvl-fix { grid-column: 1 / -1; padding-left: 30px; }
+}

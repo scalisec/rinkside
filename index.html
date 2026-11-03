@@ -143,6 +143,11 @@
     <div class="setting"><span>Playlist crossfade</span><span id="xfadeLenOut" class="num"></span>
       <input id="xfadeLen" type="range" min="0" max="10" step="0.5" aria-label="Playlist crossfade"></div>
     <label class="setting"><span>Skip songs already played this game</span><input id="skipPlayed" type="checkbox"></label>
+    <label class="setting"><span>Even out song volume<br><small>Plays loud and quiet songs at about the same level, using the volume fixes the organizer saved. Turn off to hear the songs exactly as they are.</small></span><input id="autoLevel" type="checkbox"></label>
+    <div id="levelRow" class="level-row" hidden>
+      <p class="hint">Organizers: check every song once and choose which ones get evened out. New songs you add are evened out by themselves.</p>
+      <div class="row"><button id="levelOpen" class="btn">Review song volume</button></div>
+    </div>
     </section>
 
     <section class="spanel" id="spanel-phone" role="tabpanel" aria-labelledby="stab-phone" data-panel="phone" hidden>
@@ -252,6 +257,8 @@
     <h3>Common questions</h3>
     <details><summary>Nothing plays.</summary>
       <p>Check the phone or tablet volume and the Master slider, and that Bluetooth is connected. Buttons with a dashed outline are songs not on this device yet: tap <b>Settings › Check for updates</b> on wifi.</p></details>
+    <details><summary>Some songs are much louder than others.</summary>
+      <p>Rinkside evens out the volume for you: loud songs are turned down and quiet ones turned up, so they play at about the same level. The organizer sets this up once (it's on unless <b>Settings › Playback › Even out song volume</b> is turned off). If one song still sounds wrong, tell your organizer which one.</p></details>
     <details><summary>The sound is a little late on the speaker.</summary>
       <p>Bluetooth always adds a short delay. Tap the goal horn as soon as the goal is scored. A cable to the sound system has no delay.</p></details>
     <details><summary>The screen turns off during the game.</summary>
@@ -275,7 +282,7 @@
 
     <div id="helpOrganizer" hidden>
     <h3>For organizers</h3>
-    <p class="hint"><b>Settings › Publish</b> shows each place you can publish to and what changed. <b>Admin</b> (in the same tab) shows every team, who has access, and what needs attention. New songs you put in Drive get buttons when you tap Check for updates. To give a tab's new songs a colour (say, orange for Halloween): Edit › Tab settings › Colour for new buttons. To move a button, tap Edit, then press and hold it and drag. The full guide covers publishing, Admin and the layout file.</p>
+    <p class="hint"><b>Settings › Publish</b> shows each place you can publish to and what changed. <b>Admin</b> (in the same tab) shows every team, who has access, and what needs attention. New songs you put in Drive get buttons when you tap Check for updates. To give a tab's new songs a colour (say, orange for Halloween): Edit › Tab settings › Colour for new buttons. To move a button, tap Edit, then press and hold it and drag. <b>Even out volume</b>: new songs you add are measured and evened out by themselves. For the songs already there, do a one-time check: <b>Settings › Playback › Review song volume</b>, tap Measure, untick any you'd rather leave alone, tap Apply, then Publish. To change one song, tap it in Edit: tick or untick <b>Even out this button</b>, or use its Volume slider. The full guide covers publishing, Admin and the layout file.</p>
     </div>
 
     <details id="whatsNew" class="whats-new"><summary>What's new</summary><div id="notesList"></div>

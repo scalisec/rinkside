@@ -48,9 +48,10 @@ const DEFAULTS = {
   follow: null,            // 3.1: teams shown on this device (null: decided by Drive access)
   gdView: 'auto',          // 3.5: Game Day music picker: 'auto' (row on phones, list on tablets), 'row' or 'list'
   gdTab: null,             // 3.5: the tab last picked under the Whistles on this device
+  autoLevel: true,         // 3.8: play songs with the Even out volume fix saved in the layout
 };
 
-const APP_VERSION = '3.7.0';
+const APP_VERSION = '3.8.0';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -216,6 +217,10 @@ const Show = {
         if (it.type === 'sound') {
           it.file = str(it.file, '', 400); it.start = num(it.start); it.stop = num(it.stop); it.length = num(it.length);
           it.volume = Math.min(1.5, num(it.volume ?? 1, 1));
+          // 3.8: Even out volume (measured loudness, loudest sample, the fix in dB, turned off for this button)
+          const fin = (v, lo, hi) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : undefined);
+          for (const [k, lo, hi] of [['lufs', -70, 5], ['peak', -100, 12], ['auto', -18, 6]]) { const v = fin(it[k], lo, hi); if (v === undefined) delete it[k]; else it[k] = v; }
+          if (it.noAuto !== true) delete it.noAuto;
         }
         if (it.type === 'playlist') it.songs = (Array.isArray(it.songs) ? it.songs : []).map(id);
       }
@@ -626,6 +631,186 @@ function probeDuration(blob) {
   });
 }
 
+/* 3.8: Even out volume. An editor's device listens to each song once (the part its button plays),
+   measures how loud it sounds (integrated loudness, ITU-R BS.1770 / EBU R128, in LUFS) and its
+   loudest sample, and saves a fix in dB on the button ("auto"). Every device then plays the song
+   with that fix, under the button's own Volume slider. Loud songs are turned down to the target;
+   quiet ones are turned up only as far as their loudest moment allows without distorting.
+   Goal horns and short sounds (whistle stingers, effects) are measured but left as they are.
+   The music files themselves are never changed. */
+const Loudness = {
+  TARGET: -11,     // LUFS: about where most arena songs sit, so the overall level hardly drops
+  MAX_UP: 6,       // dB
+  MAX_DOWN: -18,   // dB
+  CEILING: -1,     // dBFS: a turned-up song's loudest sample stays below this
+  MIN_LEN: 15,     // seconds played: shorter sounds are left as they are
+  RATE: 32000,     // songs are decoded at this rate to measure (plenty for loudness, half the memory)
+
+  // K-weighting (BS.1770): a high shelf then a high pass, worked out for any sample rate (as libebur128 does)
+  filters(fs) {
+    let K = Math.tan(Math.PI * 1681.974450955533 / fs), Q = 0.7071752369554196;
+    const Vh = 10 ** (3.999843853973347 / 20), Vb = Vh ** 0.4996667741545416;
+    let a0 = 1 + K / Q + K * K;
+    const shelf = { b0: (Vh + Vb * K / Q + K * K) / a0, b1: 2 * (K * K - Vh) / a0, b2: (Vh - Vb * K / Q + K * K) / a0,
+      a1: 2 * (K * K - 1) / a0, a2: (1 - K / Q + K * K) / a0 };
+    K = Math.tan(Math.PI * 38.13547087602444 / fs); Q = 0.5003270373238773; a0 = 1 + K / Q + K * K;
+    const hp = { b0: 1, b1: -2, b2: 1, a1: 2 * (K * K - 1) / a0, a2: (1 - K / Q + K * K) / a0 };
+    return [shelf, hp];
+  },
+  /* chans: Float32Arrays (one per channel), fs: sample rate, from/to: seconds (to 0 = the end).
+     Returns { lufs, peak } (peak in dBFS), or null when there's under 0.4 s or it's silent. */
+  compute(chans, fs, from = 0, to = 0) {
+    const n = chans[0].length;
+    const i0 = Math.min(n, Math.max(0, Math.floor(from * fs)));
+    const i1 = to > from ? Math.min(n, Math.floor(to * fs)) : n;
+    const hop = Math.round(fs * 0.1), nSub = Math.floor((i1 - i0) / hop);
+    if (nSub < 4) return null;
+    const [f1, f2] = this.filters(fs);
+    const sub = new Float64Array(nSub);
+    let peak = 0;
+    for (const x of chans.slice(0, 2)) {
+      let p1 = 0, p2 = 0, q1 = 0, q2 = 0; // filter states (transposed direct form II)
+      for (let k = 0, i = i0; k < nSub; k++) {
+        let e = 0;
+        for (const end = i + hop; i < end; i++) {
+          const v = x[i];
+          const av = v < 0 ? -v : v; if (av > peak) peak = av;
+          const y = f1.b0 * v + p1; p1 = f1.b1 * v - f1.a1 * y + p2; p2 = f1.b2 * v - f1.a2 * y;
+          const z = f2.b0 * y + q1; q1 = f2.b1 * y - f2.a1 * z + q2; q2 = f2.b2 * y - f2.a2 * z;
+          e += z * z;
+        }
+        sub[k] += e;
+      }
+    }
+    // 400 ms blocks every 100 ms, then the absolute (-70) and relative (-10 LU) gates
+    const blocks = [];
+    for (let k = 0; k + 4 <= nSub; k++) blocks.push((sub[k] + sub[k + 1] + sub[k + 2] + sub[k + 3]) / (4 * hop));
+    const L = z => -0.691 + 10 * Math.log10(z);
+    const loud = blocks.filter(z => z > 0 && L(z) > -70);
+    if (!loud.length) return null;
+    const rel = L(loud.reduce((a, b) => a + b, 0) / loud.length) - 10;
+    const kept = loud.filter(z => L(z) > rel);
+    return { lufs: L(kept.reduce((a, b) => a + b, 0) / kept.length), peak: peak > 0 ? 20 * Math.log10(peak) : -100 };
+  },
+  // the fix in dB for a measured song, in half-dB steps
+  fixFor(lufs, peak) {
+    let g = this.TARGET - lufs;
+    if (g > 0) g = Math.max(0, Math.min(g, this.MAX_UP, this.CEILING - peak));
+    g = Math.max(this.MAX_DOWN, g);
+    g = Math.round(g * 2) / 2;
+    return Math.abs(g) < 0.5 ? 0 : g;
+  },
+  played(s) { const len = s.stop > 0 ? s.stop : (s.length || 0); return len ? Math.max(0, len - (s.start || 0)) : 0; },
+  // why a sound is left as it is ('' = it gets evened out)
+  skip(s) {
+    if (/goal\s*horn/i.test(s.name || '')) return 'Goal horn';
+    const len = this.played(s);
+    if (len && len < this.MIN_LEN) return 'Short sound';
+    return '';
+  },
+  // the volume multiplier for playback
+  gain(s) {
+    if (!settings.autoLevel || s.noAuto || !Number.isFinite(s.auto) || !s.auto) return 1;
+    return 10 ** (s.auto / 20);
+  },
+  // saves a measurement on a button; force: even out a goal horn or short sound too
+  apply(s, m, force = false) {
+    s.lufs = Math.round(m.lufs * 10) / 10;
+    s.peak = Math.round(m.peak * 10) / 10;
+    if (force || !this.skip(s)) { s.auto = this.fixFor(m.lufs, m.peak); if (force) delete s.noAuto; }
+    else delete s.auto;
+  },
+  // measurements are also kept on this device (not in the layout), so the review doesn't measure twice
+  _cache: null,
+  ckey(s) { return keyOf(s) + '|' + (s.start || 0) + '|' + (s.stop || 0); },
+  async cache() { if (!this._cache) this._cache = new Map(Object.entries((await Store.get('kv', 'loudness')) || {})); return this._cache; },
+  known(s) { return (this._cache && this._cache.get(this.ckey(s))) || (Number.isFinite(s.lufs) ? { lufs: s.lufs, peak: s.peak ?? -100 } : null); },
+  _keep() { clearTimeout(this._ct); this._ct = setTimeout(() => Store.put('kv', 'loudness', Object.fromEntries(this._cache)).catch(() => {}), 400); },
+  forget(s) { if (this._cache) { for (const k of [...this._cache.keys()]) if (k.startsWith(keyOf(s) + '|')) this._cache.delete(k); this._keep(); } },
+  async decode(blob) {
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const dec = (c, buf) => new Promise((res, rej) => { const p = c.decodeAudioData(buf, res, rej); if (p && p.then) p.then(res, rej); });
+    try { return await dec(new OAC(2, 1, this.RATE), await blob.arrayBuffer()); }
+    catch (e) { audioCtx(); return dec(ctx, await blob.arrayBuffer()); }
+  },
+  /* Measures buttons, decoding each song file once. Returns Map(button -> {lufs, peak} | null),
+     with 'missing' for songs not on this device. opts.each(done, total), opts.stopped() */
+  async measure(list, opts = {}) {
+    const out = new Map(), byKey = new Map();
+    for (const s of list) {
+      const k = Library.resolve(s);
+      if (!k) { out.set(s, 'missing'); continue; }
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(s);
+    }
+    let done = 0;
+    for (const [k, group] of byKey) {
+      if (opts.stopped && opts.stopped()) break;
+      try {
+        const blob = await Library.blobByKey(k);
+        if (!blob) { group.forEach(s => out.set(s, 'missing')); continue; }
+        const buf = await this.decode(blob);
+        const chans = [];
+        for (let c = 0; c < Math.min(2, buf.numberOfChannels); c++) chans.push(buf.getChannelData(c));
+        const cache = await this.cache();
+        for (const s of group) {
+          if (!s.length && buf.duration) s.length = Math.round(buf.duration * 1000) / 1000; // the length wasn't known yet
+          const m = this.compute(chans, buf.sampleRate, s.start || 0, s.stop || 0);
+          out.set(s, m);
+          if (m) cache.set(this.ckey(s), { lufs: Math.round(m.lufs * 10) / 10, peak: Math.round(m.peak * 10) / 10 });
+        }
+        this._keep();
+      } catch (e) { console.warn('Could not measure', group[0]?.name, e); group.forEach(s => out.set(s, null)); }
+      done += group.length;
+      if (opts.each) opts.each(done, list.length);
+      await new Promise(r => setTimeout(r, 0));
+    }
+    return out;
+  },
+  // new songs (and changed cut points) are measured in the background, one batch after another
+  _q: [], running: false,
+  queue(items, quiet = false) {
+    items = items.filter(s => s && s.type === 'sound');
+    if (!items.length) return;
+    this._q.push(...items.map(s => ({ s, quiet })));
+    if (!this.running) this._run();
+  },
+  async _run() {
+    this.running = true;
+    let n = 0;
+    while (this._q.length) {
+      const batch = this._q.splice(0);
+      const res = await this.measure(batch.map(b => b.s));
+      for (const { s, quiet } of batch) {
+        const m = res.get(s);
+        if (!m || m === 'missing' || !idx.items.has(s.id)) continue;
+        this.apply(s, m);
+        if (!quiet && Number.isFinite(s.auto)) n++;
+      }
+      settings.localEdits = true; Prefs.save();
+      Show.save();
+      for (const t of tracks) if (res.has(t.sound) || res.has(Object.getPrototypeOf(t.sound))) t.setUserVol(t.userVol);
+      if (Edit.cur?.kind === 'sound' && res.has(Edit.cur.ref)) Edit.autoNote();
+    }
+    this.running = false;
+    if (n) UI.toast(`Evened out the volume of ${n} new song${n === 1 ? '' : 's'}.`);
+  },
+  // "Turned down 4 dB" and the like, for the button editor and the review list
+  words(s) {
+    if (!Number.isFinite(s.lufs)) return 'Not measured yet';
+    if (s.noAuto) return 'Turned off for this button';
+    if (!Number.isFinite(s.auto)) return `${this.skip(s) || 'Not evened out'}: left as is`;
+    const g = s.auto, a = Math.abs(g);
+    const db = `${g > 0 ? '+' : '−'}${a.toFixed(1).replace(/\.0$/, '')} dB`;
+    // a quiet song held back: by its loudest moment, or by the most a song is ever turned up
+    const held = g >= 0 && this.TARGET - s.lufs > g + 0.5 ? (this.CEILING - (s.peak ?? -100) <= g + 0.5 ? 'distort' : 'max') : '';
+    if (!g) return held ? 'A bit quiet, but turning it up would distort it: not changed' : 'About right: not changed';
+    const how = a < 3 ? ' a little' : a >= 6 ? ' a lot' : '';
+    const capped = held === 'distort' ? ' (as far as it goes without distorting)' : held === 'max' ? ' (the most it goes up; still a bit quiet)' : '';
+    return `Turned ${g < 0 ? 'down' : 'up'}${how} (${db})${capped}`;
+  },
+};
+
 /* ==================================================================== 5. TEAMS */
 
 /* Who can change what (3.1). The organizer (an Editor of the shared Drive folder) changes the
@@ -805,7 +990,7 @@ class Track {
     this.userVol = 1;
     this.state = 'loading'; // loading | playing | paused | fading | done
   }
-  get level() { return (this.sound.volume ?? 1) * this.userVol; }
+  get level() { return (this.sound.volume ?? 1) * Loudness.gain(this.sound) * this.userVol; } // 3.8: × the Even out volume fix
   get end() {
     const d = this.el ? this.el.duration : (this.buffer ? this.buffer.duration : this.sound.length);
     const len = isFinite(d) && d > 0 ? d : (this.sound.length || 600);
@@ -1763,8 +1948,13 @@ const Edit = {
         </div>
         <p class="hint">Play the song, then tap “Set start here” the moment the good part hits.</p>
       </div>
+      <div class="field level-box">Even out volume
+        <p id="edAuto" class="hint" aria-live="polite">${esc(this.autoText(s))}</p>
+        <div class="row"><label class="mini check"><input type="checkbox" data-f="autoOn"${this.autoChecked(s) ? ' checked' : ''}>Even out this button</label>
+          <button class="mini" data-act="measure"${has ? '' : ' disabled'}>Measure again</button></div></div>
       <label class="field">Volume <b id="edVol" class="num">${Math.round((s.volume ?? 1) * 100)}%</b>
         <input type="range" min="0" max="1.5" step="0.05" data-f="volume" value="${s.volume ?? 1}"></label>
+      <p class="hint">Volume is your own adjustment for this button, on top of Even out volume.</p>
       <div class="two">
         <label class="field">Tab<select data-f="tab">${tabsOpt}</select></label>
         <label class="field">Also put a copy on<select data-f="copyTo"><option value="">Choose a tab…</option>${copyOpt}</select></label>
@@ -1912,10 +2102,12 @@ const Edit = {
       Show.save();
       return;
     }
+    if (f === 'lvlPick') { const g = this._lvlGroups?.[+el.dataset.k]; if (g) { this._lvlPick.set(g, el.checked); this.rerender(); } return; }
     if (f === 'plSearch') { if (!committed) $('#plPick').innerHTML = this.pickList(ref, el.value); return; }
     if (f === 'name' || f === 'full') { ref[f] = el.value; Show.save(); return; }
     if (f === 'color') { const key = el.dataset.key === 'newColor' ? 'newColor' : 'color'; ref[key] = safeColor(el.value, ref[key] || null); Show.save(); if (kind === 'team') Teams.apply(); return; }
-    if (f === 'start' || f === 'stop') { if (committed) { ref[f] = Math.max(0, Math.round((+el.value || 0) * 100) / 100); Show.save(); } return; }
+    if (f === 'start' || f === 'stop') { if (committed) { ref[f] = Math.max(0, Math.round((+el.value || 0) * 100) / 100); Show.save(); this.remeasure(ref); } return; }
+    if (f === 'autoOn') { this.setAuto(ref, el.checked); return; }
     if (f === 'volume') { ref.volume = +el.value; $('#edVol').textContent = Math.round(ref.volume * 100) + '%'; tracks.filter(t => t.sound === ref).forEach(t => t.setUserVol(t.userVol)); Show.save(); return; }
     if (!committed) return;
 
@@ -1931,7 +2123,9 @@ const Edit = {
       if (added[0]) {
         ref.file = added[0].file.webkitRelativePath || added[0].file.name;
         ref.length = await probeDuration(added[0].file) || ref.length;
+        Loudness.forget(ref);
         Show.changed(); this.rerender(); UI.toast('Song file updated.');
+        this.remeasure(ref);
       }
     } else if (f === 'addSongs') {
       await this.addSongs(ref, el.files, el);
@@ -1971,8 +2165,16 @@ const Edit = {
       const v = Math.round(t.time * 4) / 4;
       if (act === 'markStart') ref.start = v; else ref.stop = v;
       $(`[data-f="${act === 'markStart' ? 'start' : 'stop'}"]`).value = v;
-      Show.save();
+      Show.save(); this.remeasure(ref);
       UI.toast(`${act === 'markStart' ? 'Start' : 'Stop'} set to ${fmt(v)} (${v}s).`);
+    } else if (act === 'measure') {
+      this.remeasure(ref, true);
+    } else if (act === 'lvlMeasure') { this.levelMeasure();
+    } else if (act === 'lvlStop') { this._lvlStop = true;
+    } else if (act === 'lvlApply') { this.levelApply();
+    } else if (act === 'lvlAll' || act === 'lvlNone') {
+      for (const g of this._lvlGroups || []) if (Loudness.known(g[0])) this._lvlPick.set(g, act === 'lvlAll' && !Loudness.skip(g[0]));
+      this.rerender();
     } else if (act === 'moveUp' || act === 'moveDown') {
       const tab = idx.tabOf.get(ref.id);
       if (tab && move(tab.items, tab.items.indexOf(ref), act === 'moveUp' ? -1 : 1)) { Show.changed(); UI.renderMain(); UI.toast('Moved.'); }
@@ -2029,6 +2231,138 @@ const Edit = {
   liveTrackFor(s) {
     return tracks.find(t => (t.sound === s || Object.getPrototypeOf(t.sound) === s) && t.state === 'playing') || null;
   },
+  /* ---------- 3.8: Even out volume ---------- */
+  autoChecked(s) { return !s.noAuto && (Number.isFinite(s.auto) || (!Number.isFinite(s.lufs) && !Loudness.skip(s))); },
+  autoText(s) {
+    let t;
+    if (!Number.isFinite(s.lufs)) t = Library.has(s) ? 'Not measured yet.' : 'Not measured yet. It gets measured on a device that has this song.';
+    else t = Loudness.words(s) + '.';
+    if (Number.isFinite(s.lufs)) t += ` Measured loudness: ${s.lufs.toFixed(1).replace('-', '−')} LUFS.`;
+    if (!settings.autoLevel) t += ' Even out song volume is turned off on this device (Settings › Playback).';
+    return t;
+  },
+  autoNote() {
+    if (this.cur?.kind !== 'sound') return;
+    const s = this.cur.ref, p = $('#edAuto'), c = $('#edBody [data-f="autoOn"]');
+    if (p) p.textContent = this.autoText(s);
+    if (c) c.checked = this.autoChecked(s);
+  },
+  levelChanged(list) {
+    settings.localEdits = true; Prefs.save(); Show.save();
+    const set = new Set(list);
+    for (const t of tracks) if (set.has(t.sound) || set.has(Object.getPrototypeOf(t.sound))) t.setUserVol(t.userVol);
+  },
+  setAuto(s, on) {
+    if (on) {
+      delete s.noAuto;
+      if (Number.isFinite(s.lufs)) s.auto = Loudness.fixFor(s.lufs, s.peak ?? -100);
+      else { this.remeasure(s, true, true); return; }
+    } else s.noAuto = true;
+    this.levelChanged([s]); this.autoNote();
+  },
+  // measures one button again: loud = tapped Measure again (right away, with a word); otherwise after a cut point changed
+  async remeasure(s, loud = false, force = false) {
+    if (!Library.has(s)) { if (loud) UI.toast('This song isn\'t on this device, so it can\'t be measured here.'); return; }
+    clearTimeout(this._rmT);
+    const go = async () => {
+      if (loud && $('#edAuto')) $('#edAuto').textContent = 'Measuring…';
+      const m = (await Loudness.measure([s])).get(s);
+      if (m && m !== 'missing') Loudness.apply(s, m, force || (!s.noAuto && Number.isFinite(s.auto) && !!Loudness.skip(s)));
+      else if (loud) UI.toast('This song couldn\'t be measured.');
+      this.levelChanged([s]); this.autoNote();
+    };
+    if (loud) await go(); else this._rmT = setTimeout(go, 600);
+  },
+  // the one-time review: every song this person may change, loudest first
+  async level(_r, keep) {
+    const first = !$('#editor').open || this.cur?.kind !== 'level';
+    this.cur = { kind: 'level', ref: null };
+    if (!Loudness._cache) await Loudness.cache();
+    if (!keep || !this._lvlGroups) {
+      const map = new Map();
+      for (const s of idx.sounds.values()) {
+        if (!Perm.item(s)) continue;
+        const k = Loudness.ckey(s);
+        if (!map.has(k)) map.set(k, []);
+        map.get(k).push(s);
+      }
+      this._lvlGroups = [...map.values()];
+      this._lvlPick = new Map(this._lvlGroups.map(g => [g, this.autoChecked(g[0])]));
+      this._lvlOthers = [...idx.sounds.values()].some(s => !Perm.item(s));
+    }
+    const groups = this._lvlGroups;
+    const info = g => ({ g, s: g[0], m: Loudness.known(g[0]), has: Library.has(g[0]), pick: this._lvlPick.get(g) });
+    const rows = groups.map((g, i) => ({ ...info(g), i }))
+      .sort((a, b) => (!!b.m - !!a.m) || (b.has - a.has) || (a.m && b.m ? b.m.lufs - a.m.lufs : a.s.name.localeCompare(b.s.name)));
+    const toMeasure = rows.filter(r => !r.m && r.has).length, missing = rows.filter(r => !r.m && !r.has);
+    const picked = rows.filter(r => r.m && r.pick).length;
+    const T = Loudness.TARGET, pos = l => Math.max(2, Math.min(100, (l + 24) / 20 * 100));
+    const row = r => {
+      let fix, w = 0, c = '#8ea2b3';
+      if (r.m) {
+        w = pos(r.m.lufs); c = r.m.lufs > T + 2 ? '#e53a2f' : r.m.lufs < T - 2 ? '#1c9ad6' : '#7fd89a';
+        fix = Loudness.words({ ...r.s, lufs: r.m.lufs, peak: r.m.peak, auto: r.pick ? Loudness.fixFor(r.m.lufs, r.m.peak) : undefined, noAuto: undefined });
+      } else fix = r.has ? 'Not measured yet' : 'Not on this device: tap Check for updates first';
+      return `<li class="lvl-row${r.m ? '' : ' none'}"><label class="lvl-pick"><input type="checkbox" data-f="lvlPick" data-k="${r.i}"${r.pick && r.m ? ' checked' : ''}${r.m ? '' : ' disabled'}>
+        <span class="lvl-name">${esc(r.s.name)}${r.g.length > 1 ? ` <small>(${r.g.length} buttons)</small>` : ''}</span></label>
+        <span class="lvl-bar" aria-hidden="true"><i style="width:${w}%;background:${c}"></i><b style="left:${pos(T)}%"></b></span>
+        <span class="lvl-fix">${esc(fix)}</span></li>`;
+    };
+    const busy = !!this._lvlBusy;
+    this.show('Even out volume', `
+      <p class="hint">Some songs are recorded much louder than others. Rinkside can listen to each song once on this device and work out how much to turn it down or up, so they all play at about the same level. The music files aren't changed, and each button's own Volume still works on top.</p>
+      <ol class="steps-mini"><li>Tap <b>Measure</b> (about a second per song; keep the app open).</li><li>Untick any song you'd rather leave as it is.</li><li>Tap <b>Apply</b>, then <b>Publish</b> so every volunteer gets it.</li></ol>
+      ${settings.autoLevel ? '' : '<p class="hint warn-text">Even out song volume is turned off on this device (Settings › Playback), so you won\'t hear the difference here.</p>'}
+      ${toMeasure || busy ? `<div class="row"><button class="mini primary" data-act="lvlMeasure"${busy ? ' disabled' : ''}>Measure ${toMeasure} song${toMeasure === 1 ? '' : 's'}</button>
+        ${busy ? '<button class="mini" data-act="lvlStop">Stop</button>' : ''}</div>` : ''}
+      <p id="lvlProgress" class="progress" aria-live="polite">${busy ? 'Measuring…' : toMeasure ? '' : 'Every song on this device is measured.'}</p>
+      <div class="lvl-head"><b>${groups.length - missing.length} song${groups.length - missing.length === 1 ? '' : 's'} on this device, loudest first</b><span class="lvl-key"><b></b>Target level</span>
+        <span class="spacer"></span><button class="mini" data-act="lvlAll">Tick all</button><button class="mini" data-act="lvlNone">Untick all</button></div>
+      <ol class="lvl-list">${rows.filter(r => r.m || r.has).map(row).join('') || '<li class="hint">No songs on this device yet.</li>'}</ol>
+      ${missing.length ? `<details class="clean-list"><summary>${missing.length} song${missing.length === 1 ? ' isn\'t' : 's aren\'t'} on this device, so ${missing.length === 1 ? 'it' : 'they'} can't be measured here</summary>
+        <p class="hint">Tap Check for updates (on wifi) to download them, then come back.</p><ul>${missing.map(r => `<li>${esc(r.s.name)}</li>`).join('')}</ul></details>` : ''}
+      <p class="hint">Goal horns and sounds shorter than 15 seconds are left as they are unless you tick them.${this._lvlOthers ? ' Songs on other teams\' tabs aren\'t listed: their music volunteer looks after them.' : ''} New songs you add from now on are evened out by themselves.</p>
+      <div class="row lvl-apply"><button class="btn primary" data-act="lvlApply"${busy ? ' disabled' : ''}>Apply to ${picked} ticked song${picked === 1 ? '' : 's'}</button></div>`);
+    if (first) $('#edBody').scrollTop = 0;
+  },
+  async levelMeasure() {
+    const todo = this._lvlGroups.filter(g => !Loudness.known(g[0]) && Library.has(g[0]));
+    if (!todo.length) return;
+    this._lvlStop = false; this._lvlBusy = true;
+    await this.level(null, true);
+    const flat = todo.flat();
+    const res = await Loudness.measure(flat, {
+      each: (d, n) => { const p = $('#lvlProgress'); if (p) p.textContent = `Measured ${d} of ${n}…`; },
+      stopped: () => this._lvlStop || !$('#editor').open || this.cur?.kind !== 'level',
+    });
+    this._lvlBusy = false;
+    for (const g of todo) { const m = res.get(g[0]); if (m && m !== 'missing') this._lvlPick.set(g, !g[0].noAuto && !Loudness.skip(g[0])); }
+    const failed = todo.filter(g => res.get(g[0]) === null).length;
+    if ($('#editor').open && this.cur?.kind === 'level') {
+      await this.level(null, true);
+      const p = $('#lvlProgress');
+      if (p) p.textContent = this._lvlStop ? 'Stopped. Tap Measure to carry on.' : failed ? `${failed} song${failed === 1 ? '' : 's'} couldn't be measured.` : 'Done. Check the list, then tap Apply.';
+    }
+  },
+  levelApply() {
+    const changed = [];
+    for (const g of this._lvlGroups) {
+      const m = Loudness.known(g[0]);
+      if (!m) continue;
+      const pick = this._lvlPick.get(g);
+      for (const s of g) {
+        const before = JSON.stringify([s.lufs, s.peak, s.auto, s.noAuto]);
+        s.lufs = m.lufs; s.peak = m.peak;
+        if (pick) { s.auto = Loudness.fixFor(m.lufs, m.peak); delete s.noAuto; }
+        else { delete s.auto; if (Loudness.skip(s)) delete s.noAuto; else s.noAuto = true; }
+        if (JSON.stringify([s.lufs, s.peak, s.auto, s.noAuto]) !== before) changed.push(s);
+      }
+    }
+    this.levelChanged(changed);
+    const n = this._lvlGroups.filter(g => Loudness.known(g[0]) && this._lvlPick.get(g)).length;
+    UI.toast(changed.length ? `Saved: ${n} song${n === 1 ? '' : 's'} evened out. Publish to share it with the volunteers.` : 'Nothing changed.');
+    this.rerender();
+  },
   tick() {
     if (!this.cur || this.cur.kind !== 'sound') return;
     const el = $('#edPos');
@@ -2043,14 +2377,17 @@ const Edit = {
     const say = m => { const p = $('#edProgress'); if (p && $('#editor').open) p.textContent = m; else UI.toast(m); };
     const { added, failed, cancelled } = await Library.importFiles(files, (i, n) => say(`Adding ${i} of ${n} songs…`));
     if (cancelled) { if (input) input.value = ''; say('Cancelled. Nothing was added.'); return; }
+    const fresh = [];
     for (const { file } of added) {
-      tab.items.push({
+      const it = {
         type: 'sound', id: uid(), name: prettyName(file.name), file: file.webkitRelativePath || file.name,
         start: 0, stop: 0, volume: 1, length: await probeDuration(file), color: tab.newColor || null,
-      });
+      };
+      tab.items.push(it); fresh.push(it);
     }
     if (input) input.value = '';
     Show.changed();
+    Loudness.queue(fresh); // 3.8: evened out in the background
     UI.renderTabs(); UI.renderMain(); UI.renderHead();
     say(added.length
       ? `Added ${added.length} song${added.length === 1 ? '' : 's'} to ${tab.name}.${failed ? ` ${failed} couldn't be saved on this device.` : ''}`
@@ -2351,10 +2688,11 @@ const Drive = {
       }
       let length = 0;
       try { const blob = await Library.blobByKey(Library.byTail.get(norm(f.path).split('/').slice(-2).join('/'))); if (blob) length = await probeDuration(blob); } catch (e) {}
-      tab.items.push({ type: 'sound', id: uid(), name: prettyName(parts[parts.length - 1]), file: parts.slice(-2).join('/'), start: 0, stop: 0, volume: 1, length, color: tab.newColor || null });
-      made.push({ name: prettyName(parts[parts.length - 1]), tab: tab.name });
+      const it = { type: 'sound', id: uid(), name: prettyName(parts[parts.length - 1]), file: parts.slice(-2).join('/'), start: 0, stop: 0, volume: 1, length, color: tab.newColor || null };
+      tab.items.push(it);
+      made.push({ name: prettyName(parts[parts.length - 1]), tab: tab.name, it });
     }
-    if (made.length) { Show.changed(); settings.localEdits = true; Prefs.save(); await Store.put('kv', 'show', show).catch(() => {}); }
+    if (made.length) { Show.changed(); settings.localEdits = true; Prefs.save(); await Store.put('kv', 'show', show).catch(() => {}); Loudness.queue(made.map(m => m.it)); }
     return made;
   },
   pickPack(files) {
@@ -2769,13 +3107,17 @@ const Diff = {
     for (const t of before.tabs) if (!tabsA.has(t.id)) out.push(`Deleted tab “${t.name}”`);
     const items = s => { const m = new Map(); for (const t of s.tabs) for (const it of t.items) m.set(it.id, { it, tab: t.name }); return m; };
     const B = items(before), A = items(after);
+    const LEVEL = ['lufs', 'peak', 'auto', 'noAuto'], noLevel = it => J(Object.fromEntries(Object.entries(it).filter(([k]) => !LEVEL.includes(k))));
+    let levelled = 0;
     for (const [id, { it, tab }] of A) {
       const o = B.get(id);
       if (!o) out.push(`Added “${it.name}” on ${tab}`);
       else if (o.tab !== tab) out.push(`Moved “${it.name}” to ${tab}`);
+      else if (J(o.it) !== J(it) && noLevel(o.it) === noLevel(it)) { if (J(LEVEL.map(k => o.it[k])) !== J(LEVEL.map(k => it[k]))) levelled++; }
       else if (J(o.it) !== J(it)) out.push(o.it.name !== it.name ? `Renamed “${o.it.name}” to “${it.name}” on ${tab}` : `Changed “${it.name}” on ${tab}${it.type === 'playlist' ? ' (playlist)' : ''}`);
     }
     for (const [id, { it, tab }] of B) if (!A.has(id)) out.push(`Removed “${it.name}” from ${tab}`);
+    if (levelled) out.push(`Evened out the volume of ${levelled} song${levelled === 1 ? '' : 's'}`);
     const teamsB = new Map(before.teams.map(t => [t.id, t]));
     for (const t of after.teams) { const o = teamsB.get(t.id); if (!o) out.push(`Added team “${t.full}”`); else if (J(o) !== J(t)) out.push(`Changed team “${t.full}” (goal horn, playlists, colour or logo)`); }
     for (const t of before.teams) if (!after.teams.some(x => x.id === t.id)) out.push(`Removed team “${t.full}”`);
@@ -2942,14 +3284,16 @@ const Settings = {
     bind('xfadeLen', 'playlistXfade', 'xfadeLenOut', v => v + ' s');
     const gv = $('#gdView');
     if (gv) { gv.value = settings.gdView || 'auto'; gv.addEventListener('change', () => { settings.gdView = gv.value; Prefs.save(); UI.renderTabs(); UI.renderMain(); }); }
-    for (const key of ['skipPlayed']) {
+    for (const key of ['skipPlayed', 'autoLevel']) {
       const el = $('#' + key);
       el.checked = settings[key];
       el.addEventListener('change', () => {
         settings[key] = el.checked; Prefs.save();
+        if (key === 'autoLevel') for (const t of tracks) t.setUserVol(t.userVol); // 3.8: playing songs change level straight away
         UI.refreshPads();
       });
     }
+    $('#levelOpen').addEventListener('click', () => { $('#settings').close(); Edit.level(); });
     this.initDrive();
   },
 
@@ -3207,7 +3551,7 @@ const Settings = {
       if (est) $('#storageInfo').textContent = `Using ${(est.usage / 1e9).toFixed(2)} GB of about ${(est.quota / 1e9).toFixed(0)} GB available to this app.`;
     } catch (e) {}
   },
-  open(tab) { this.render(); applyRole(); this.tab(tab || this.tabName); $('#settings').showModal(); },
+  open(tab) { this.render(); applyRole(); $('#levelRow').hidden = !Perm.any(); this.tab(tab || this.tabName); $('#settings').showModal(); },
   /* Start over: the team's layout from Drive. Without sign-in or internet, the layout built into
      the app (the Drive layout when this version was made) is used instead, and the person is told. */
   async resetLayout() {

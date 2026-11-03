@@ -1,5 +1,19 @@
 [
   {
+    "version": "3.8.0",
+    "date": "2026-11-03",
+    "notes": [
+      {
+        "type": "new",
+        "text": "Even out volume: loud songs are turned down and quiet ones turned up, so songs play at about the same level. New songs are evened out by themselves when they're added. Turn it off in Settings › Playback if you want to hear the songs exactly as they are."
+      },
+      {
+        "type": "new",
+        "text": "Organizers: Settings › Playback › Review song volume checks the songs already in the app once. Untick any you'd rather leave alone, tap Apply, then Publish."
+      }
+    ]
+  },
+  {
     "version": "3.7.0",
     "date": "2026-10-31",
     "notes": [
