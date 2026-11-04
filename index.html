@@ -255,6 +255,11 @@
     </ol>
 
     <h3>Common questions</h3>
+    <details><summary>How do I line up songs, or follow a game plan? (Music Planner)</summary>
+      <p>Tap <b>Change view</b> next to the lock (on a phone, the small layout icon) and pick <b>Music Planner</b>.</p>
+      <p><b>Game plan</b>: the game's big moments in order (Warm-up, Anthem, Puck drop…). Tap <b>NEXT</b> to play the next one. <b>‹</b> goes back a step, <b>Skip</b> jumps one. Tap <b>See the whole plan</b> (on a phone, <b>Plan</b>) and tap any moment to make it next.</p>
+      <p><b>Up next</b>: tap <b>+</b> on a song to line it up. Drag the dots to change the order, <b>×</b> to take one off. <b>PLAY NEXT</b> plays the top song. With <b>Start the next one when a song ends</b> ticked, the next song starts by itself. Fade out all and Stop don't start the next one. On a phone, tap <b>List</b> to see Up next.</p>
+      <p><b>Your own plan</b>: your team may give you a starting plan. Tap <b>Edit my plan</b> to change it on your device only: tap a song to add it, tap a moment to rename it, drag to reorder, <b>×</b> to remove. Tap <b>Done</b>. <b>Go back to the team plan</b> undoes your changes. If the team sends a new plan, you'll see <b>Use the new one</b> or <b>Keep mine</b>; nothing changes until you pick. <b>New game</b> puts the plan back at the start.</p></details>
     <details><summary>Nothing plays.</summary>
       <p>Check the phone or tablet volume and the Master slider, and that Bluetooth is connected. Buttons with a dashed outline are songs not on this device yet: tap <b>Settings › Check for updates</b> on wifi.</p></details>
     <details><summary>Some songs are much louder than others.</summary>
@@ -274,7 +279,7 @@
     <details><summary>I'm my team's music volunteer. How do I change our music?</summary>
       <p>Tap <b>Check for updates</b>, then <b>Edit</b>. Tap the team button to pick the goal horn and playlists. Then <b>Settings › Publish</b> and tap <b>Publish</b> next to your team.</p></details>
     <details><summary>Where did the tabs go?</summary>
-      <p>Everything is on <b>Game Day</b> now. GOAL!, Pregame, Game music and the Whistles stay at the top. Pick a tab right under the Whistles (a row on phones, a list on tablets) and its buttons appear. To switch, tap <b>Change view</b> next to the lock: <b>Classic</b> (the old screen), <b>Portrait</b> (row), <b>Landscape</b> (list) or <b>Default</b>. The tabs across the top come back in <b>Edit</b>.</p></details>
+      <p>Everything is on <b>Game Day</b> now. GOAL!, Pregame, Game music and the Whistles stay at the top. Pick a tab right under the Whistles (a row on phones, a list on tablets) and its buttons appear. To switch, tap <b>Change view</b> next to the lock: <b>Classic</b> (the old screen), <b>Portrait</b> (row), <b>Landscape</b> (list) or <b>Music Planner</b> (a game plan and songs lined up). The tabs across the top come back in <b>Edit</b>.</p></details>
     <details><summary>How do I move a button?</summary>
       <p>Tap <b>Edit</b>, then <b>press and hold</b> the button until it lifts up, and drag it to its new spot. Then <b>Settings › Publish</b> so everyone gets the new order.</p></details>
     <details><summary>I made a mess. Can I undo?</summary>
@@ -282,7 +287,7 @@
 
     <div id="helpOrganizer" hidden>
     <h3>For organizers</h3>
-    <p class="hint"><b>Settings › Publish</b> shows each place you can publish to and what changed. <b>Admin</b> (in the same tab) shows every team, who has access, and what needs attention. New songs you put in Drive get buttons when you tap Check for updates. To give a tab's new songs a colour (say, orange for Halloween): Edit › Tab settings › Colour for new buttons. To move a button, tap Edit, then press and hold it and drag. <b>Even out volume</b>: new songs you add are measured and evened out by themselves. For the songs already there, do a one-time check: <b>Settings › Playback › Review song volume</b>, tap Measure, untick any you'd rather leave alone, tap Apply, then Publish. To change one song, tap it in Edit: tick or untick <b>Even out this button</b>, or use its Volume slider. The full guide covers publishing, Admin and the layout file.</p>
+    <p class="hint"><b>Settings › Publish</b> shows each place you can publish to and what changed. <b>Admin</b> (in the same tab) shows every team, who has access, and what needs attention. New songs you put in Drive get buttons when you tap Check for updates. To give a tab's new songs a colour (say, orange for Halloween): Edit › Tab settings › Colour for new buttons. To move a button, tap Edit, then press and hold it and drag. <b>Even out volume</b>: new songs you add are measured and evened out by themselves. For the songs already there, do a one-time check: <b>Settings › Playback › Review song volume</b>, tap Measure, untick any you'd rather leave alone, tap Apply, then Publish. To change one song, tap it in Edit: tick or untick <b>Even out this button</b>, or use its Volume slider. <b>Team starting game plan</b> (Music Planner): tap <b>Edit</b>, then <b>Edit the team's starting plan</b> in the plan. Tap songs or <b>Add the whole tab</b>, pick the moment for each, tap <b>Done</b>, then <b>Done</b> on Edit, then Publish. Volunteers who changed their own plan are asked before theirs changes. The full guide covers publishing, Admin and the layout file.</p>
     </div>
 
     <details id="whatsNew" class="whats-new"><summary>What's new</summary><div id="notesList"></div>
@@ -302,6 +307,10 @@
     <div id="askBtns" class="ask-btns"></div>
   </div>
 </dialog>
+
+<!-- ============ 3.9: Music Planner: the whole plan or Up next (phones), and picking a moment ============ -->
+<dialog id="plSheet" class="pl-sheet" aria-label="Game plan"></dialog>
+<dialog id="plMoment" class="ask pl-moment" aria-label="Pick a moment"></dialog>
 
 <div id="updateBar" class="update-bar" role="status" hidden>
   <p><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg><span>A new version of Rinkside is ready<span id="updateVer"></span>.</span></p>

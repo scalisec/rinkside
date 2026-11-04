@@ -1,5 +1,23 @@
 [
   {
+    "version": "3.9.0",
+    "date": "2026-11-03",
+    "notes": [
+      {
+        "type": "new",
+        "text": "Music Planner, a new choice in Change view (it replaces Default). A game plan with one NEXT button plays the game's big moments in order (Warm-up, Anthem, Puck drop…). Up next: tap + on a song to line it up, drag to reorder, and the next song can start by itself when one ends."
+      },
+      {
+        "type": "new",
+        "text": "Your plan is yours: tap Edit my plan to change it on your device only. If your team sends a new starting plan, you choose Use the new one or Keep mine."
+      },
+      {
+        "type": "new",
+        "text": "Organizers and team music volunteers: set the team's starting plan in Edit › Edit the team's starting plan, then Publish."
+      }
+    ]
+  },
+  {
     "version": "3.8.0",
     "date": "2026-11-03",
     "notes": [

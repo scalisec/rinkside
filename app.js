@@ -46,12 +46,13 @@ const DEFAULTS = {
   teamAccess: [],          // 3.1: teams whose Drive folder this account can see
   drivePacks: {},          // 3.1: teamId -> { id, name, modifiedTime } of the team pack last loaded or published
   follow: null,            // 3.1: teams shown on this device (null: decided by Drive access)
-  gdView: 'auto',          // 3.5: Game Day music picker: 'auto' (row on phones, list on tablets), 'row' or 'list'
+  gdView: 'auto',          // 3.5: Game Day music picker: 'auto' (row on phones, list on tablets), 'row', 'list', 'classic' or (3.9) 'planner'
   gdTab: null,             // 3.5: the tab last picked under the Whistles on this device
   autoLevel: true,         // 3.8: play songs with the Even out volume fix saved in the layout
+  upAuto: true,            // 3.9: Music Planner: start the next song in Up next when one ends
 };
 
-const APP_VERSION = '3.8.0';
+const APP_VERSION = '3.9.0';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -197,6 +198,7 @@ const Show = {
       t.id = id(t.id); t.name = str(t.name, 'Team', 40); t.full = str(t.full, t.name, 80);
       t.color = safeColor(t.color, '#3563d8'); t.shape = t.shape === 'square' ? 'square' : 'round'; t.logo = safeImage(t.logo);
       for (const f of ['goalHorn', 'pregame', 'game']) t[f] = t[f] == null ? null : id(t[f]);
+      if (t.plan != null) { t.plan = Planner.clean(t.plan); if (!t.plan.length) delete t.plan; } // 3.9: the team's starting game plan
     });
     const gd = s.gameday && typeof s.gameday === 'object' ? s.gameday : {};
     const groups = list => (Array.isArray(list) ? list : []).filter(g => g && typeof g === 'object')
@@ -950,6 +952,296 @@ function gameDaySections() {
   return out;
 }
 
+/* 3.9: Music Planner (a view in Change view). Two things side by side:
+   - Game plan: the game's big moments in order (Warm-up, Anthem, Puck drop...), each with a song, a
+     playlist or a whole tab, and one NEXT button that plays the next moment.
+   - Up next: songs lined up for in between, played with PLAY NEXT or when a song ends.
+   A team can have a starting plan (team.plan in the layout, set in Edit and published like the rest).
+   Each device can change its own copy; nobody else is affected. When a new starting plan arrives,
+   a device that changed its copy keeps it and is asked; one that didn't just gets the new one.
+   Up next and where each device is in the plan stay on that device (localStorage 'rinkside.planner'). */
+const Planner = {
+  MAX: 40,
+  MOMENTS: ['Warm-up', 'Anthem', 'Starting lineup', 'Puck drop', 'Goal', 'Power play', 'Penalty kill', 'Timeout',
+    'End of 1st', 'Start of 2nd', 'End of 2nd', 'Start of 3rd', 'Overtime', 'Final horn', 'Win', 'Handshakes'],
+  data: {},       // teamId -> { mine: [steps] | null, seen: hash of the team plan "mine" was checked against, pos, queue: [sound ids] }
+  editing: null,  // null | 'mine' | 'team'
+  drag: null,
+  clean(list) {
+    return (Array.isArray(list) ? list : []).filter(s => s && typeof s === 'object').slice(0, this.MAX).map(s => {
+      const o = { when: (typeof s.when === 'string' ? s.when : '').trim().slice(0, 40) || 'Moment' };
+      if (typeof s.tab === 'string' && s.tab && s.tab.length <= 64) o.tab = s.tab;
+      else if (typeof s.ref === 'string' && s.ref && s.ref.length <= 64) o.ref = s.ref;
+      else return null;
+      return o;
+    }).filter(Boolean);
+  },
+  load() {
+    let d = {};
+    try { d = JSON.parse(localStorage.getItem('rinkside.planner') || '{}'); } catch (e) {}
+    this.data = {};
+    if (d && typeof d === 'object' && !Array.isArray(d)) for (const [k, v] of Object.entries(d)) {
+      if (!v || typeof v !== 'object' || k.length > 64) continue;
+      this.data[k] = { mine: Array.isArray(v.mine) ? this.clean(v.mine) : null, seen: typeof v.seen === 'string' ? v.seen.slice(0, 40) : '',
+        pos: Number.isInteger(v.pos) && v.pos >= 0 ? v.pos : 0, queue: (Array.isArray(v.queue) ? v.queue : []).filter(x => typeof x === 'string' && x.length <= 64).slice(0, 100) };
+    }
+  },
+  save() { try { localStorage.setItem('rinkside.planner', JSON.stringify(this.data)); } catch (e) {} },
+  d(team = Teams.current) { const id = team?.id || '_'; return this.data[id] || (this.data[id] = { mine: null, seen: '', pos: 0, queue: [] }); },
+  hash(steps) { let h = 5381; const s = JSON.stringify(steps || []); for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36) + ':' + s.length; },
+  teamPlan(team = Teams.current) { return (team && Array.isArray(team.plan)) ? team.plan : []; },
+  steps(team = Teams.current) { const d = this.d(team); return d.mine || this.teamPlan(team); },
+  mine() { return !!this.d().mine; },
+  newTeamPlan() { const d = this.d(); return !!d.mine && d.seen !== this.hash(this.teamPlan()); },
+  pos() { const d = this.d(), n = this.steps().length; if (d.pos > n) d.pos = n; return d.pos; },
+  item(step) { return step.ref ? idx.items.get(step.ref) || null : null; },
+  tabOf(step) { return step.tab ? Show.tab(step.tab) || null : null; },
+  label(step) {
+    const tab = this.tabOf(step), it = this.item(step);
+    if (tab) return `${tab.name} (whole tab, shuffled)`;
+    if (it) return it.type === 'playlist' ? `${it.name} (playlist)` : splitName(it.name).title;
+    return 'Song not found';
+  },
+  // the list being changed: this device's own copy (made from the team plan the first time) or, in Edit, the team's
+  target() {
+    if (this.editing === 'team') { const t = Teams.current; if (!Array.isArray(t.plan)) t.plan = []; return t.plan; }
+    const d = this.d();
+    if (!d.mine) { d.mine = Packs.clone(this.teamPlan()); d.seen = this.hash(this.teamPlan()); }
+    return d.mine;
+  },
+  changed() {
+    if (this.editing === 'team') { const t = Teams.current; if (t.plan && !t.plan.length) delete t.plan; Show.changed(); }
+    this.save(); this.render();
+  },
+  canTeam() { return Edit.on && Perm.teamSettings(Teams.current); },
+
+  /* ---------- playing ---------- */
+  playStep(step) {
+    const it = this.item(step), tab = this.tabOf(step);
+    audioCtx();
+    if (it && it.type === 'sound') return playSound(it, { chain: true });
+    if (it && it.type === 'playlist') return startPlaylist(it);
+    if (tab) return this.playTab(tab);
+    UI.toast('That song isn\'t in the layout any more, so this step was skipped.');
+  },
+  playTab(tab) {
+    const songs = tab.items.filter(i => i.type === 'sound');
+    if (!songs.some(s => Library.has(s))) { UI.toast(`No songs from “${tab.name}” are on this device yet.`); return; }
+    activePL = { pl: { id: 'tab:' + tab.id, type: 'playlist', name: tab.name, songs: songs.map(s => s.id) }, order: shuffled(songs), pos: -1, track: null };
+    playlistNext();
+  },
+  next() {
+    const st = this.steps(), d = this.d(), i = this.pos();
+    if (i >= st.length) return;
+    d.pos = i + 1; this.save();
+    buzz();
+    this.playStep(st[i]);
+    this.render();
+  },
+  queue() { const d = this.d(); d.queue = d.queue.filter(id => idx.sounds.has(id)); return d.queue; },
+  playNext() {
+    const q = this.queue();
+    while (q.length) {
+      const s = idx.sounds.get(q.shift());
+      if (s && Library.has(s)) { this.save(); audioCtx(); playSound(s, { chain: true }); this.render(); return true; }
+    }
+    this.save(); this.render();
+    return false;
+  },
+  // a song started from the planner ran to its end by itself: start the next one in Up next
+  ended(t) {
+    if (!t.chain || !settings.upAuto || !this.queue().length || isPaused()) return;
+    if (tracks.some(x => x !== t && !x.preview && (x.state === 'playing' || x.state === 'loading'))) return;
+    setTimeout(() => { if (!tracks.some(x => !x.preview && (x.state === 'playing' || x.state === 'loading'))) this.playNext(); }, 60);
+  },
+
+  /* ---------- drawing ---------- */
+  showing() { return UI.view === 'gameday' && !UI.query && UI.gdMode() === 'planner'; },
+  render() {
+    if (this.showing()) UI.renderMain();
+    if ($('#plSheet')?.open) this.sheetRender();
+  },
+  stepRow(s, k, i, editing) {
+    const done = k < i, nx = k === i;
+    if (editing) return `<li class="pl-row" data-k="${k}"><span class="pl-grip" data-pl-drag="steps" aria-label="Drag to reorder">${ICONS.grip}</span>
+      <button class="pl-when-btn" data-ui="pl" data-pl-act="when" data-k="${k}"><b>${esc(s.when)} ▾</b><span>${esc(this.label(s))}</span></button>
+      <button class="pl-x" data-ui="pl" data-pl-act="stepX" data-k="${k}" aria-label="Remove ${esc(s.when)}">${ICONS.x}</button></li>`;
+    return `<button class="pl-step${done ? ' done' : ''}${nx ? ' next' : ''}" data-ui="pl" data-pl-act="jump" data-k="${k}">
+      <span class="pl-num">${done ? ICONS.tick : nx ? ICONS.resume : k + 1}</span><span class="pl-txt"><b>${nx ? 'Next · ' : ''}${esc(s.when)}</b><span>${esc(this.label(s))}</span></span></button>`;
+  },
+  queueRows() {
+    const q = this.queue();
+    if (!q.length) return `<li class="pl-empty">Nothing lined up yet. Tap <b>+</b> on a song to add it here.</li>`;
+    return q.map((id, k) => `<li class="pl-row" data-k="${k}"><span class="pl-grip" data-pl-drag="queue" aria-label="Drag to reorder">${ICONS.grip}</span>
+      <span class="pl-qn">${k + 1}</span><span class="pl-qname">${esc(splitName(idx.sounds.get(id).name).title)}</span>
+      <button class="pl-x" data-ui="pl" data-pl-act="qX" data-k="${k}" aria-label="Remove ${esc(idx.sounds.get(id).name)}">${ICONS.x}</button></li>`).join('');
+  },
+  badge() { return this.mine() ? '<span class="pl-chip mine">My changes</span>' : (this.teamPlan().length ? '<span class="pl-chip">Team plan</span>' : ''); },
+  notice() {
+    return this.newTeamPlan() ? `<div class="pl-notice" role="status"><p><b>There's a new team plan.</b> Your changed plan is still here.</p>
+      <div class="row"><button class="mini primary" data-ui="pl" data-pl-act="useTeam">Use the new one</button><button class="mini" data-ui="pl" data-pl-act="keepMine">Keep mine</button></div></div>` : '';
+  },
+  editorHtml() {
+    const team = this.editing === 'team', st = team ? this.teamPlan() : this.steps();
+    const cur = UI.gdCurrent(UI.gdTabs());
+    return `<div class="pl-head"><h2>${team ? `${esc(Teams.current.name)} starting plan` : 'My plan'}</h2>${team ? '' : this.badge()}
+        <button class="mini primary pl-done" data-ui="pl" data-pl-act="done">Done</button></div>
+      <p class="hint pl-hint">${team ? 'Everyone on this team starts with this plan once you Publish. Anyone who changed their own plan is asked before theirs changes.'
+        : 'Changes stay on this device. Nobody else\'s plan changes.'} Tap a song to add it, or add the whole tab. Drag to reorder, tap a moment to rename it.</p>
+      <ol class="pl-list pl-steps-edit" data-pl-list="steps">${st.length ? st.map((s, k) => this.stepRow(s, k, -1, true)).join('') : '<li class="pl-empty">No moments yet. Tap a song to add the first one.</li>'}</ol>
+      <div class="pl-edit-btns">${cur ? `<button class="mini" data-ui="pl" data-pl-act="addTab" data-tab-id="${esc(cur.id)}">${ICONS.plus}Add the whole “${esc(cur.name)}” tab</button>` : ''}
+        ${!team && this.mine() ? `<button class="mini" data-ui="pl" data-pl-act="reset">Go back to the team plan</button>` : ''}</div>`;
+  },
+  panelHtml(wide) {
+    if (this.editing) return this.editorHtml();
+    const st = this.steps(), i = this.pos(), cur = st[i], then = st[i + 1], q = this.queue();
+    const nx = q.length ? idx.sounds.get(q[0]) : null;
+    const teamBtn = this.canTeam() ? `<button class="mini" data-ui="pl" data-pl-act="editTeam">${ICONS.pen}Edit the team's starting plan</button>` : '';
+    if (!wide) {
+      return `${this.notice()}<div class="pl-strip-row">
+          <div class="pl-strip-txt"><b class="pl-k">${cur ? `Next · ${esc(cur.when)} <span>(${i + 1} of ${st.length})</span>` : st.length ? 'Game plan done' : 'Game plan'}</b>
+            <span>${cur ? esc(this.label(cur)) : st.length ? 'Every moment has been played' : 'No plan yet'}</span></div>
+          <button class="mini" data-ui="pl" data-pl-act="planSheet">Plan</button>
+          ${cur ? `<button class="pl-go" data-ui="pl" data-pl-act="next">NEXT</button>` : ''}</div>
+        <div class="pl-strip-row">
+          <div class="pl-strip-txt"><b class="pl-k up">Up next · ${q.length}</b><span>${nx ? esc(splitName(nx.name).title) : 'Tap + on a song'}</span></div>
+          <button class="mini" data-ui="pl" data-pl-act="queueSheet">List</button>
+          <button class="pl-go up" data-ui="pl" data-pl-act="playNext"${nx ? '' : ' disabled'}>PLAY</button></div>${teamBtn ? `<div class="row">${teamBtn}</div>` : ''}`;
+    }
+    const card = cur
+      ? `<div class="pl-card"><b class="pl-k">Next · ${esc(cur.when)}</b><span class="pl-big">${esc(this.label(cur))}</span>
+          ${then ? `<span class="pl-then">Then: ${esc(then.when)} · ${esc(this.label(then))}</span>` : ''}
+          <div class="pl-btns"><button class="mini pl-sq" data-ui="pl" data-pl-act="back" aria-label="Back one step"${i ? '' : ' disabled'}>${ICONS.back}</button>
+            <button class="pl-go" data-ui="pl" data-pl-act="next">${ICONS.resume}NEXT</button>
+            <button class="mini" data-ui="pl" data-pl-act="skip">Skip</button></div></div>`
+      : `<div class="pl-card empty"><span class="pl-big">${st.length ? 'Every moment has been played' : 'No game plan yet'}</span>
+          <span class="pl-then">${st.length ? 'Tap a moment in the plan to play it again.' : (settings.locked ? 'Unlock to make one for this device.' : 'Tap Edit my plan to make one for this device.')}</span>
+          ${st.length ? `<div class="pl-btns"><button class="mini" data-ui="pl" data-pl-act="restart">Start the plan over</button></div>` : ''}</div>`;
+    return `<div class="pl-head"><h2>Game plan</h2>${this.badge()}<span class="pl-count">${cur ? `Step ${i + 1} of ${st.length}` : ''}</span></div>
+      <div class="pl-links"><button class="pl-link" data-ui="pl" data-pl-act="planSheet"${st.length ? '' : ' hidden'}>See the whole plan</button>${settings.locked ? '' : '<button class="pl-link" data-ui="pl" data-pl-act="editMine">Edit my plan</button>'}</div>
+      ${this.notice()}${card}${teamBtn ? `<div class="row">${teamBtn}</div>` : ''}
+      <div class="pl-head up"><h2>Up next</h2><span class="pl-count">${q.length} song${q.length === 1 ? '' : 's'}</span>${q.length ? '<button class="pl-link" data-ui="pl" data-pl-act="qClear">Clear</button>' : ''}</div>
+      <ol class="pl-list" data-pl-list="queue">${this.queueRows()}</ol>
+      <label class="pl-auto"><input type="checkbox" data-pl-auto${settings.upAuto ? ' checked' : ''}> Start the next one when a song ends</label>
+      <button class="pl-go up wide" data-ui="pl" data-pl-act="playNext"${nx ? '' : ' disabled'}>${ICONS.next}${nx ? `PLAY NEXT · ${esc(splitName(nx.name).title)}` : 'UP NEXT IS EMPTY'}</button>`;
+  },
+  // the music under the tabs, with + (or the place in Up next) on each song
+  gridHtml(items) {
+    const q = this.queue();
+    return items.map(i => {
+      const pad = UI.padHtml(i);
+      if (this.editing || Edit.on || i.type !== 'sound') return `<div class="pl-cell">${pad}</div>`;
+      const n = q.indexOf(i.id);
+      return `<div class="pl-cell">${pad}${n >= 0 ? `<span class="pl-badge" aria-label="Up next number ${n + 1}">${n + 1}</span>`
+        : `<button class="pl-add" data-ui="pl" data-pl-act="add" data-ref="${esc(i.id)}" aria-label="Add ${esc(i.name)} to Up next">${ICONS.plus}</button>`}</div>`;
+    }).join('');
+  },
+
+  /* ---------- the Plan and List sheets (phones), and picking a moment ---------- */
+  sheet(kind) { this._sheet = kind; this.sheetRender(); const d = $('#plSheet'); if (!d.open) d.showModal(); },
+  sheetRender() {
+    const d = $('#plSheet'); if (!d) return;
+    const st = this.steps(), i = this.pos();
+    let title = '', body = '';
+    if (this._sheet === 'plan') {
+      title = 'Game plan';
+      body = `<div class="row pl-sheet-top">${this.badge()}<span class="hint">Tap a moment to make it next.</span></div>
+        <div class="pl-steps">${st.map((s, k) => this.stepRow(s, k, i, false)).join('') || '<p class="hint">No game plan yet.</p>'}</div>
+        <div class="row">${settings.locked ? '' : `<button class="btn" data-ui="pl" data-pl-act="editMine">${ICONS.pen}Edit my plan</button>`}${this.canTeam() ? `<button class="btn" data-ui="pl" data-pl-act="editTeam">Edit the team's starting plan</button>` : ''}</div>`;
+    } else {
+      title = 'Up next';
+      body = `<ol class="pl-list" data-pl-list="queue">${this.queueRows()}</ol>
+        <label class="pl-auto"><input type="checkbox" data-pl-auto${settings.upAuto ? ' checked' : ''}> Start the next one when a song ends</label>
+        <div class="row">${this.queue().length ? '<button class="btn" data-ui="pl" data-pl-act="qClear">Clear</button>' : ''}</div>`;
+    }
+    d.innerHTML = `<div class="dlg-head"><h2>${title}</h2><button class="btn" data-ui="pl" data-pl-act="close">Close</button></div><div class="dlg-body">${body}</div>`;
+  },
+  closeSheet() { const d = $('#plSheet'); if (d?.open) d.close(); },
+  pickMoment(title, cur) {
+    const d = $('#plMoment');
+    return new Promise(res => {
+      d.innerHTML = `<div class="dlg-head"><h2>${esc(title)}</h2></div><div class="dlg-body">
+        <div class="pl-moments">${this.MOMENTS.map(m => `<button class="btn${m === cur ? ' primary' : ''}" data-m="${esc(m)}">${esc(m)}</button>`).join('')}</div>
+        <label class="field"><span>Or type your own</span><input id="plOwn" maxlength="40" placeholder="e.g. Senior night" value="${cur && !this.MOMENTS.includes(cur) ? esc(cur) : ''}"></label>
+        <div class="ask-btns"><button class="btn" data-m="">Cancel</button><button class="btn primary" data-own>Use what I typed</button></div></div>`;
+      const done = v => { d.onclick = null; d.oncancel = null; d.close(); res(v); };
+      d.oncancel = e => { e.preventDefault(); done(null); };
+      d.onclick = e => {
+        const b = e.target.closest('button'); if (!b) return;
+        if (b.hasAttribute('data-own')) { const v = $('#plOwn').value.trim(); if (v) done(v.slice(0, 40)); else $('#plOwn').focus(); return; }
+        done(b.dataset.m || null);
+      };
+      d.showModal();
+    });
+  },
+  async addStep(step, name) {
+    const when = await this.pickMoment(`When should “${name}” play?`);
+    if (!when) return;
+    const t = this.target();
+    if (t.length >= this.MAX) { UI.toast(`A plan can have up to ${this.MAX} moments.`); return; }
+    t.push({ when, ...step });
+    this.changed();
+    UI.toast(`Added “${name}” at ${when}.`);
+  },
+
+  /* ---------- taps ---------- */
+  async act(a, el) {
+    const k = +el.dataset.k, d = this.d();
+    switch (a) {
+      case 'next': this.next(); break;
+      case 'back': d.pos = Math.max(0, this.pos() - 1); this.save(); this.render(); break;
+      case 'skip': d.pos = Math.min(this.steps().length, this.pos() + 1); this.save(); this.render(); break;
+      case 'restart': d.pos = 0; this.save(); this.render(); break;
+      case 'jump': d.pos = k; this.save(); this.closeSheet(); this.render(); UI.toast(`“${this.steps()[k]?.when}” is next.`); break;
+      case 'add': if (!this.queue().includes(el.dataset.ref)) { d.queue.push(el.dataset.ref); this.save(); buzz(); this.render(); UI.toast(`#${d.queue.length} in Up next.`); } break;
+      case 'qX': d.queue.splice(k, 1); this.save(); this.render(); break;
+      case 'qClear': d.queue = []; this.save(); this.render(); UI.toast('Up next cleared.'); break;
+      case 'playNext': this.closeSheet(); this.playNext(); break;
+      case 'planSheet': this.sheet('plan'); break;
+      case 'queueSheet': this.sheet('queue'); break;
+      case 'close': this.closeSheet(); break;
+      case 'editMine': if (settings.locked) { UI.toast('Press and hold the lock to unlock, then change your plan.'); break; } this.closeSheet(); this.editing = 'mine'; this.render(); break;
+      case 'editTeam': if (this.canTeam()) { this.closeSheet(); this.editing = 'team'; this.render(); } break;
+      case 'done': this.editing = null; this.render(); break;
+      case 'stepX': { const t = this.target(); t.splice(k, 1); if (k < d.pos) d.pos--; this.changed(); break; }
+      case 'when': { const t = this.target(); const w = await this.pickMoment('Change the moment', t[k]?.when); if (w && t[k]) { t[k].when = w; this.changed(); } break; }
+      case 'addTab': { const tab = Show.tab(el.dataset.tabId); if (tab) this.addStep({ tab: tab.id }, `${tab.name} (whole tab)`); break; }
+      case 'reset': d.mine = null; d.seen = ''; this.save(); this.render(); UI.toast('Back to the team plan.'); break;
+      case 'useTeam': d.mine = null; d.seen = ''; this.save(); this.render(); UI.toast('Now using the new team plan.'); break;
+      case 'keepMine': d.seen = this.hash(this.teamPlan()); this.save(); this.render(); UI.toast('Kept your plan. To switch later: Edit my plan › Go back to the team plan.'); break;
+    }
+  },
+  // drag the dots on a row to reorder Up next or the plan
+  down(e) {
+    const g = e.target.closest('[data-pl-drag]'); if (!g) return false;
+    const list = g.closest('[data-pl-list]'), row = g.closest('[data-k]'); if (!list || !row) return false;
+    e.preventDefault();
+    this.drag = { kind: g.dataset.plDrag, list, cur: +row.dataset.k, id: e.pointerId };
+    row.classList.add('dragging');
+    try { list.setPointerCapture(e.pointerId); } catch (_) {}
+    return true;
+  },
+  move(e) {
+    const D = this.drag; if (!D || e.pointerId !== D.id) return;
+    const rows = [...D.list.querySelectorAll(':scope > [data-k]')]; let to = rows.length - 1;
+    for (let k = 0; k < rows.length; k++) { const r = rows[k].getBoundingClientRect(); if (e.clientY < r.top + r.height / 2) { to = k; break; } }
+    if (to === D.cur) return;
+    const arr = D.kind === 'queue' ? this.d().queue : this.target();
+    const [m] = arr.splice(D.cur, 1); arr.splice(to, 0, m);
+    const el = rows[D.cur];
+    if (to > D.cur) rows[to].after(el); else rows[to].before(el);
+    D.cur = to;
+    [...D.list.querySelectorAll(':scope > [data-k]')].forEach((r, k) => { r.dataset.k = k; const n = r.querySelector('.pl-qn'); if (n) n.textContent = k + 1; r.querySelectorAll('[data-k]').forEach(b => b.dataset.k = k); });
+    D.moved = true;
+  },
+  up(e) {
+    const D = this.drag; if (!D || e.pointerId !== D.id) return;
+    this.drag = null;
+    if (D.moved) { if (D.kind === 'queue') this.save(); else this.changed(); }
+    this.render();
+  },
+};
+
 /* ==================================================================== 7. AUDIO ENGINE */
 
 let ctx = null, master = null;
@@ -1052,7 +1344,7 @@ class Track {
         const src = ctx.createBufferSource();
         src.buffer = this.buffer; src.connect(this.gain);
         this.offset = at; this.t0 = ctx.currentTime;
-        src.onended = () => this.stop();
+        src.onended = () => { if (this.state === 'playing') this._natural = true; this.stop(); };
         src.start(0, at); this.src = src;
       }
     } catch (e) { console.error(e); this.stop(); return; }
@@ -1074,7 +1366,7 @@ class Track {
     // Always seek, even for songs with no start point: Safari's engine can stall when
     // a song routed through the mixer starts without a seek. 10 ms is inaudible.
     a.currentTime = Math.max(0.01, Math.min(this.sound.start || 0, Math.max(0, (a.duration || 1e9) - 0.5)));
-    a.onended = () => this.stop();
+    a.onended = () => { if (this.state === 'playing') this._natural = true; this.stop(); };
     await a.play();
     this._watch(a.currentTime);
   }
@@ -1103,7 +1395,7 @@ class Track {
     src.connect(this.gain);
     this.offset = Math.min(this.sound.start || 0, Math.max(0, this.buffer.duration - 0.5));
     this.t0 = ctx.currentTime;
-    src.onended = () => this.stop();
+    src.onended = () => { if (this.state === 'playing') this._natural = true; this.stop(); };
     src.start(0, this.offset);
     this.src = src;
   }
@@ -1131,6 +1423,7 @@ class Track {
     if (this.playlist && this.playlist.track === this) this.playlist.track = null;
     UI.renderDock();
     UI.refreshPads();
+    if (this._natural && !this.preview) Planner.ended(this);
   }
   _teardown() {
     this._cleanupElement();
@@ -1159,7 +1452,7 @@ function resumeAll() {
 }
 function togglePause() { if (isPaused()) resumeAll(); else if (tracks.some(t => t.state === 'playing' || t.state === 'loading')) pauseAll(); }
 
-async function playSound(sound, { preview = false } = {}) {
+async function playSound(sound, { preview = false, chain = false } = {}) {
   if (!Library.has(sound)) {
     UI.toast('That song file isn\'t on this device yet. Add your music in Settings.');
     return null;
@@ -1170,6 +1463,7 @@ async function playSound(sound, { preview = false } = {}) {
   if (live && preview) live.stop();
   if (settings.oneAtATime || preview) fadeAll(settings.fadeSeconds, null, !preview); // paused sounds stay on hold
   const t = new Track(sound, null, { preview });
+  t.chain = chain; // 3.9: started from the Music Planner, so Up next can follow it
   tracks.push(t);
   UI.renderDock();
   try {
@@ -1260,14 +1554,14 @@ function tick() {
   for (const t of [...tracks]) {
     if (t.state === 'loading' || t.state === 'done' || t.state === 'paused') continue;
     const remaining = t.end - t.time;
-    if (remaining <= 0.05) { t.stop(); continue; }
+    if (remaining <= 0.05) { if (t.state === 'playing') t._natural = true; t.stop(); continue; } // 3.9: ran out by itself (not faded out)
     if (t.playlist && t.playlist === activePL && t.playlist.track === t && settings.playlistAuto &&
         t.state === 'playing' && !t._advanced && remaining <= settings.playlistXfade) {
       t._advanced = true;
       playlistNext({ auto: true });
     }
     // a stop point gets a short fade so it doesn't click off
-    if (t.sound.stop && !t.preview && t.state === 'playing' && remaining <= 0.6 && !t.playlist) t.fadeOut(0.5);
+    if (t.sound.stop && !t.preview && t.state === 'playing' && remaining <= 0.6 && !t.playlist) { t._natural = true; t.fadeOut(0.5); }
   }
   UI.updateProgress();
   Edit.tick();
@@ -1292,6 +1586,10 @@ const ICONS = {
   horn: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10v4h4l6 5V5L7 10zM16 8a5 5 0 0 1 0 8M19 5a9 9 0 0 1 0 14"/></svg>',
   pen: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></svg>',
   plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+  grip: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"/></svg>',
+  x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  tick: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>',
+  back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
 };
 
 function buzz(ms = 12) { try { navigator.vibrate?.(ms); } catch (e) {} }
@@ -1304,8 +1602,8 @@ const UI = {
   init() {
     $('#search').addEventListener('input', e => { this.query = e.target.value.trim(); this.renderMain(); });
     // 3.5: turning a tablet (or resizing a window) can switch Game Day between the row and the list
-    let gdLast = this.gdMode();
-    addEventListener('resize', () => { const m = this.gdMode(); if (m !== gdLast) { gdLast = m; if (!this.query) { this.renderTabs(); this.renderMain(); } } });
+    let gdLast = this.gdMode() + this.plWide();
+    addEventListener('resize', () => { const m = this.gdMode() + this.plWide(); if (m !== gdLast) { gdLast = m; if (!this.query) { this.renderTabs(); this.renderMain(); } } });
     $('#fadeAll').addEventListener('click', () => { buzz(); fadeAll(); });
     $('#stopAll').addEventListener('click', () => { buzz(); stopAll(); });
     $('#pauseAll').addEventListener('click', () => { buzz(); togglePause(); });
@@ -1328,8 +1626,10 @@ const UI = {
     ng.addEventListener('click', () => {
       if (ng.dataset.armed) {
         played.clear(); Prefs.savePlayed(); delete ng.dataset.armed;
+        for (const v of Object.values(Planner.data)) v.pos = 0; Planner.save(); // 3.9: the game plan starts again too
         ng.classList.remove('warn'); this.renderHead(); this.refreshPads();
-        this.toast('New game. Every song is fresh again.');
+        this.toast('New game. Every song is fresh again and the game plan is back at the start.');
+        if (Planner.showing()) this.renderMain();
       } else {
         ng.dataset.armed = '1'; ng.classList.add('warn');
         ng.textContent = `Tap again to clear ${played.size} played`;
@@ -1361,11 +1661,16 @@ const UI = {
       if (!b) return;
       const item = this.itemsById.get(b.dataset.id);
       if (!item) return;
+      // 3.9: changing a game plan: a tap on a song or playlist adds it as a step
+      if (Planner.editing && b.closest('.pl-grid')) {
+        if (item.type === 'sound' || item.type === 'playlist') Planner.addStep({ ref: item.id }, item.type === 'sound' ? splitName(item.name).title : item.name);
+        return;
+      }
       if (Edit.on) { if (Edit.allowed(item, b)) Edit.openFor(item, b); return; }
       audioCtx();
       buzz();
       b.classList.remove('hit'); void b.offsetWidth; b.classList.add('hit');
-      if (item.type === 'sound') playSound(item);
+      if (item.type === 'sound') playSound(item, { chain: !!b.closest('.pl-grid') });
       else if (item.type === 'group') playGroup(item);
       else if (item.type === 'playlist') startPlaylist(item);
       else if (item.type === 'next') playlistNext();
@@ -1374,6 +1679,15 @@ const UI = {
         else startPlaylist(item.pl);
       }
     });
+    // 3.9: Music Planner: drag to reorder, the "start the next one" box, and the Plan / List sheets
+    for (const el of [$('#main'), $('#plSheet')]) {
+      el.addEventListener('pointerdown', e => Planner.down(e));
+      el.addEventListener('pointermove', e => Planner.move(e));
+      el.addEventListener('pointerup', e => Planner.up(e));
+      el.addEventListener('pointercancel', e => Planner.up(e));
+      el.addEventListener('change', e => { if (e.target.matches('[data-pl-auto]')) { settings.upAuto = e.target.checked; Prefs.save(); Planner.render(); } });
+    }
+    $('#plSheet').addEventListener('click', e => { const a = e.target.closest('[data-ui="pl"]'); if (a) Planner.act(a.dataset.plAct, a); });
     $('#main').addEventListener('change', e => {
       if (e.target.matches('[data-add-songs]')) Edit.addSongs(Show.tab(e.target.dataset.addSongs), e.target.files, e.target);
     });
@@ -1433,6 +1747,7 @@ const UI = {
   },
 
   uiAction(act, el) {
+    if (act === 'pl') { Planner.act(el.dataset.plAct, el); return; }
     if (act === 'gd-pick') { settings.gdTab = el.dataset.tabId; Prefs.save(); this.renderMain(); return; }
     if (act === 'settings') Settings.open();
     if (act === 'drive') { Settings.open('updates'); setTimeout(() => { $('#driveSection').scrollIntoView({ block: 'start' }); if (Drive.ready()) $('#driveCheck').click(); }, 50); }
@@ -1449,6 +1764,7 @@ const UI = {
     if (on) this.viewMenu(false);
     settings.locked = on; Prefs.save();
     if (on && Edit.on) Edit.toggle(false);
+    if (on && Planner.editing) { Planner.editing = null; this.renderMain(); } // 3.9
     document.body.classList.toggle('locked', on);
     const lock = $('#lockBtn');
     lock.setAttribute('aria-pressed', String(on));
@@ -1488,7 +1804,8 @@ const UI = {
   },
   /* 3.5: Game Day. GOAL!, Pregame/Game music and the Whistles stay put; under them, the music picked from
      the tabs: a row of tabs (phones) or a list down the side (tablets), then Moments and the rest. */
-  gdMode() { const v = settings.gdView || 'auto'; return v === 'auto' ? (window.innerWidth >= 900 ? 'list' : 'row') : v; }, // 'row' | 'list' | 'classic'
+  gdMode() { const v = settings.gdView || 'auto'; return v === 'auto' ? (window.innerWidth >= 900 ? 'list' : 'row') : v; }, // 'row' | 'list' | 'classic' | 'planner'
+  plWide() { return window.innerWidth >= 900; }, // 3.9: Music Planner: a panel on the right (tablets) or a strip under the Whistles (phones)
   gdTabs() { return Show.visibleTabs(false); },
   gdCurrent(tabs) { return tabs.find(t => t.id === settings.gdTab) || tabs.find(t => /warm/i.test(t.name)) || tabs[0] || null; },
   sectionHtml(sec, extra = '') {
@@ -1501,20 +1818,31 @@ const UI = {
     const mode = this.gdMode();
     const secs = gameDaySections(), wh = secs[0], rest = secs.slice(1).filter(sec => sec.items.length || (Edit.on && sec.editable));
     const tabs = this.gdTabs(), cur = this.gdCurrent(tabs);
-    const key = mode + '|' + (cur?.id || '') + '|' + (Teams.current?.id || '');
+    const plan = mode === 'planner', wide = plan && this.plWide();
+    const key = mode + wide + '|' + (cur?.id || '') + '|' + (Teams.current?.id || '');
     const keep = {};
-    for (const sel of ['.gd-scroll', '.gd-list', '.gd-top', '.gd-chips']) { const e = main.querySelector(sel); if (e) keep[sel] = [e.scrollTop, e.scrollLeft]; }
+    for (const sel of ['.gd-scroll', '.gd-list', '.gd-top', '.gd-chips', '.pl-panel', '.pl-steps-edit']) { const e = main.querySelector(sel); if (e) keep[sel] = [e.scrollTop, e.scrollLeft]; }
     const same = this._gdKey === key; this._gdKey = key;
     const tabBtn = t => `<button class="tab" role="tab" data-ui="gd-pick" data-tab-id="${esc(t.id)}" aria-selected="${t === cur}"
         style="--c:${esc(t.color || '#4d4d4d')};--on:${hexLight(t.color) ? '#0b131a' : '#fff'}"><i></i><span class="gd-name">${esc(t.name)}</span><em class="num">${t.items.length}</em></button>`;
     const top = this.heroHtml() + this.sectionHtml(wh, ' whistles');
     const music = (cur
       ? `<h2 class="section-title gd-title">${esc(cur.name)}<span>${cur.items.length}</span></h2>`
-        + (cur.items.length ? `<div class="grid">${cur.items.map(i => this.padHtml(i)).join('')}</div>` : `<p class="hint">This tab is empty.</p>`)
+        + (cur.items.length ? (plan ? `<div class="grid pl-grid">${Planner.gridHtml(cur.items)}</div>` : `<div class="grid">${cur.items.map(i => this.padHtml(i)).join('')}</div>`) : `<p class="hint">This tab is empty.</p>`)
       : `<p class="hint">No music tabs yet. Tap Check for updates in Settings.</p>`)
       + rest.map(sec => this.sectionHtml(sec)).join('');
     let html;
-    if (mode === 'list') {
+    const editBanner = plan && Planner.editing ? `<div class="banner pl-banner"><div><strong>${Planner.editing === 'team' ? 'Changing the team\'s starting plan.' : 'Changing your plan (this device only).'}</strong>
+      <p>Tap a song or playlist below to add it as a moment. Tap Done in the plan when you're finished.</p></div></div>` : '';
+    if (wide) {
+      html = `<div class="gd-top">${top}</div>
+        <div class="gd-scroll">${banner}${editBanner}<div class="gd-pick"><div class="gd-chips" role="tablist" aria-label="Music">${tabs.map(tabBtn).join('')}</div></div>${music}</div>
+        <aside class="pl-panel" aria-label="Game plan and Up next">${Planner.panelHtml(true)}</aside>`;
+    } else if (plan) {
+      html = `<div class="gd-top">${top}</div>
+        <div class="gd-scroll">${banner}<section class="pl-strip${Planner.editing ? ' pl-panel' : ''}" aria-label="Game plan and Up next">${Planner.panelHtml(!!Planner.editing)}</section>${editBanner}
+        <div class="gd-pick"><div class="gd-chips" role="tablist" aria-label="Music">${tabs.map(tabBtn).join('')}</div></div>${music}</div>`;
+    } else if (mode === 'list') {
       html = `<div class="gd-top">${top}</div>
         <nav class="gd-list" role="tablist" aria-label="Music"><h2 class="section-title">Music<span>${tabs.length} tabs</span></h2>${tabs.map(tabBtn).join('')}</nav>
         <div class="gd-scroll">${banner}${music}</div>`;
@@ -1522,8 +1850,9 @@ const UI = {
       html = `<div class="gd-top">${top}</div>
         <div class="gd-scroll">${banner}<div class="gd-pick"><div class="gd-chips" role="tablist" aria-label="Music">${tabs.map(tabBtn).join('')}</div></div>${music}</div>`;
     }
-    main.classList.add('gd'); main.classList.toggle('gd-row-mode', mode !== 'list'); main.classList.toggle('gd-list-mode', mode === 'list');
-    document.body.classList.toggle('gd-list-app', mode === 'list');
+    main.classList.add('gd'); main.classList.toggle('gd-row-mode', mode !== 'list' && !wide); main.classList.toggle('gd-list-mode', mode === 'list');
+    main.classList.toggle('gd-plan-mode', plan); main.classList.toggle('gd-plan-wide', wide);
+    document.body.classList.toggle('gd-list-app', mode === 'list' || wide);
     const mt = main.scrollTop;
     main.innerHTML = html;
     main.scrollTop = same ? mt : 0;
@@ -1531,7 +1860,10 @@ const UI = {
       const e = main.querySelector(sel); if (!e) continue;
       if (same || sel === '.gd-list' || sel === '.gd-chips' || sel === '.gd-top') { e.scrollTop = t; e.scrollLeft = l; }
     }
-    if (!same) main.querySelector('.gd-pick [aria-selected="true"], .gd-list [aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    if (!same && plan) { // 3.9: bring the picked tab into view sideways only, so the page itself doesn't jump
+      const c = main.querySelector('.gd-chips'), on = c?.querySelector('[aria-selected="true"]');
+      if (c && on) { const cr = c.getBoundingClientRect(), r = on.getBoundingClientRect(); if (r.left < cr.left || r.right > cr.right) c.scrollLeft = Math.max(0, c.scrollLeft + r.left - cr.left - 16); }
+    } else if (!same) main.querySelector('.gd-pick [aria-selected="true"], .gd-list [aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     this.refreshPads();
   },
   padHtml(item) {
@@ -1615,7 +1947,7 @@ const UI = {
     const classic = this.gdMode() === 'classic'; // 3.5: Classic = the 3.4 Game Day, tab row always shown
     document.body.classList.toggle('gd-classic', classic);
     if (!Edit.on && !classic && this.view !== 'gameday') this.view = 'gameday';
-    if (this.query || this.view !== 'gameday' || classic) { main.classList.remove('gd', 'gd-row-mode', 'gd-list-mode'); document.body.classList.remove('gd-list-app'); }
+    if (this.query || this.view !== 'gameday' || classic) { main.classList.remove('gd', 'gd-row-mode', 'gd-list-mode', 'gd-plan-mode', 'gd-plan-wide'); document.body.classList.remove('gd-list-app'); }
     let html = this.banner();
     if (this.query) {
       const q = this.query.toLowerCase();
@@ -1789,7 +2121,7 @@ const UI = {
     });
     (m.querySelector('.trow.on') || m.querySelector('.trow'))?.focus();
   },
-  // 3.5.1: Change view (next to Lock): Classic, Portrait (row of tabs), Landscape (list down the side), Default
+  // 3.5.1: Change view (next to Lock): Classic, Portrait (row of tabs), Landscape (list down the side); 3.9: Music Planner replaced Default
   viewMenu(open) {
     document.querySelector('.tmenu')?.remove(); document.querySelector('.tscrim')?.remove();
     const btn = $('#viewBtn');
@@ -1801,9 +2133,9 @@ const UI = {
     m.className = 'tmenu view-menu'; m.setAttribute('role', 'menu'); m.setAttribute('aria-label', 'Change view');
     m.style.left = Math.max(8, Math.min(r.right - 290, innerWidth - 298)) + 'px';
     m.style.top = (r.bottom + 6) + 'px';
-    const cur = settings.gdView || 'auto';
+    const cur = this.gdMode(); // 3.9: Default left the menu; on Default the tick shows Portrait or Landscape, whichever this screen uses
     const opts = [['classic', 'Classic', 'Tabs across the top, Game Day as one long page'], ['row', 'Portrait', 'A row of tabs under the Whistles'],
-      ['list', 'Landscape', 'A list of tabs down the side'], ['auto', 'Default', 'Portrait on phones, Landscape on tablets']];
+      ['list', 'Landscape', 'A list of tabs down the side'], ['planner', 'Music Planner', 'A game plan with a NEXT button, and songs lined up for in between']];
     m.innerHTML = '<h4>Change view</h4>' + opts.map(([v, name, sub]) => `<button class="trow${v === cur ? ' on' : ''}" role="menuitemradio" aria-checked="${v === cur}" data-view="${v}">
         <span>${name}<small>${sub}</small></span>${v === cur ? '<span class="tick">✓</span>' : ''}</button>`).join('');
     document.body.append(scrim, m);
@@ -1839,6 +2171,7 @@ const Edit = {
     // leaving Edit: if anything changed, this device now has its own version of the layout
     if (!want && this.on && this._before && this._before !== JSON.stringify(show)) { settings.localEdits = true; Prefs.save(); }
     this.on = want;
+    if (!this.on && Planner.editing === 'team') Planner.editing = null; // 3.9
     if (!this.on && UI.gdMode() !== 'classic') UI.view = 'gameday'; // 3.5: tabs open on their own only in Edit (not in Classic)
     document.body.classList.toggle('editing', this.on);
     const b = $('#editBtn');
@@ -3119,7 +3452,13 @@ const Diff = {
     for (const [id, { it, tab }] of B) if (!A.has(id)) out.push(`Removed “${it.name}” from ${tab}`);
     if (levelled) out.push(`Evened out the volume of ${levelled} song${levelled === 1 ? '' : 's'}`);
     const teamsB = new Map(before.teams.map(t => [t.id, t]));
-    for (const t of after.teams) { const o = teamsB.get(t.id); if (!o) out.push(`Added team “${t.full}”`); else if (J(o) !== J(t)) out.push(`Changed team “${t.full}” (goal horn, playlists, colour or logo)`); }
+    for (const t of after.teams) {
+      const o = teamsB.get(t.id);
+      if (!o) { out.push(`Added team “${t.full}”`); continue; }
+      const np = x => J({ ...x, plan: undefined });
+      if (np(o) !== np(t)) out.push(`Changed team “${t.full}” (goal horn, playlists, colour or logo)`);
+      if (J(o.plan || []) !== J(t.plan || [])) out.push(`Changed the starting game plan for “${t.full}”`); // 3.9
+    }
     for (const t of before.teams) if (!after.teams.some(x => x.id === t.id)) out.push(`Removed team “${t.full}”`);
     if (J(before.gameday) !== J(after.gameday)) out.push('Changed the Game Day groups (whistles, moments or game over)');
     const common = x => x.tabs.filter(t => tabsA.has(t.id) && tabsB.has(t.id)).map(t => t.id);
@@ -4070,6 +4409,7 @@ function setShow(s) {
 }
 
 async function boot() {
+  Planner.load();
   UI.init();
   Edit.init();
   Drag.init();
