@@ -1,5 +1,16 @@
 [
   {
+    "version": "3.9.1",
+    "date": "2026-11-09",
+    "quiet": true,
+    "notes": [
+      {
+        "type": "improved",
+        "text": "Behind-the-scenes tidy-up: removed leftover code from features that were retired earlier. Nothing changes in how the app looks or works."
+      }
+    ]
+  },
+  {
     "version": "3.9.0",
     "date": "2026-11-03",
     "notes": [

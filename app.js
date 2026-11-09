@@ -4,8 +4,8 @@
  *
  * Everything about a show (tabs, buttons, cut points, playlists, Game Day
  * groupings, teams and logos) lives in one "show" object that is saved on the
- * device and can be exported as a small layout file (.rinkside.json) or as a
- * (3.3: the full show pack with the music was removed; Check for updates does that job).
+ * device and can be saved as a small layout file (.rinkside.json). The music
+ * comes from Google Drive (Check for updates).
  *
  * File layout (search for the "====" banners):
  *   1. CONFIG         defaults you might change
@@ -17,7 +17,8 @@
  *   7. AUDIO ENGINE   playing, fading, playlists
  *   8. UI             tabs, buttons, now-playing panel
  *   9. EDIT MODE      editors for buttons, playlists, tabs, groupings, teams
- *  10. SHARING        layout files and show packs
+ *  10. SHARING        saving and opening layout files
+ *  10b. GOOGLE DRIVE  sign-in, downloads, publishing
  *  11. SETTINGS, HELP, STARTUP
  */
 'use strict';
@@ -52,7 +53,7 @@ const DEFAULTS = {
   upAuto: true,            // 3.9: Music Planner: start the next song in Up next when one ends
 };
 
-const APP_VERSION = '3.9.0';
+const APP_VERSION = '3.9.1';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -2816,23 +2817,13 @@ const Share = {
     // never read a big file as text: it can freeze a phone
     if (file.size > 20e6) throw new Error('toobig');
     const json = JSON.parse((await file.text()).replace(/^\uFEFF/, ''));
-    return { kind: 'layout', show: Show.normalise(json), files: [], size: file.size };
+    return { show: Show.normalise(json), size: file.size };
   },
 
-  async apply(parsed, say) {
-    try { await navigator.storage?.persist?.(); } catch (e) {}
-    const items = parsed.files.map(f => ({ ...f, size: f.blob.size }));
-    if (!(await Library.sortDuplicates(items))) return { failed: 0, cancelled: true };
-    let n = 0, failed = 0;
-    for (const f of items) {
-      if (f.skip) { n++; continue; }
-      if (urlCache.has(f.key)) { URL.revokeObjectURL(urlCache.get(f.key)); urlCache.delete(f.key); }
-      if (!(await Library.putBlob(f.key, f.blob))) failed++;
-      if (++n % 10 === 0 || n === parsed.files.length) say(`Copying songs ${n} of ${parsed.files.length}…`);
-    }
+  // a layout file only changes the buttons; the music on the device stays as it is
+  async apply(parsed) {
     setShow(parsed.show);
     await Store.put('kv', 'show', show).catch(() => {});
-    return { failed };
   },
 };
 
@@ -3092,7 +3083,7 @@ const Drive = {
       const m = manifest[have];
       let changed;
       if (m) changed = s.md5 && m.md5 ? s.md5 !== m.md5 : s.size !== m.size;
-      else { // loaded from a folder or show pack: same size means same file
+      else { // no download record for this song (added in Edit): same size means same file
         const b = await Library.blobByKey(have);
         changed = !!b && !!s.size && b.size !== s.size;
         if (!changed) manifest[have] = { id: s.id, md5: s.md5, size: s.size };
@@ -3581,17 +3572,13 @@ const Settings = {
       const p = this.pending;
       if (!p) return;
       $('#confirmOpen').hidden = true;
-      say('Copying songs…');
       try {
-        const { failed, cancelled } = await Share.apply(p, say);
-        if (cancelled) { say('Cancelled. Nothing was changed.'); this.pending = null; return; }
+        await Share.apply(p);
         settings.driveLayout = null; settings.localEdits = false; Prefs.save();
-        say(failed
-          ? `Opened “${show.name}”, but ${failed} of ${p.files.length} songs couldn't be saved on this device (it may be out of space). They'll work until the app is closed. Free up space and open the pack again.`
-          : `Opened “${show.name}”.`);
+        say(`Opened “${show.name}”.`);
       } catch (err) {
         console.error(err);
-        say('Something went wrong while copying the songs. Make sure the device has enough free space and try again.');
+        say('Something went wrong while opening the layout file. Try again.');
       }
       this.pending = null;
       this.render();
@@ -3621,8 +3608,6 @@ const Settings = {
     };
     bind('fadeLen', 'fadeSeconds', 'fadeLenOut', v => v + ' s');
     bind('xfadeLen', 'playlistXfade', 'xfadeLenOut', v => v + ' s');
-    const gv = $('#gdView');
-    if (gv) { gv.value = settings.gdView || 'auto'; gv.addEventListener('change', () => { settings.gdView = gv.value; Prefs.save(); UI.renderTabs(); UI.renderMain(); }); }
     for (const key of ['skipPlayed', 'autoLevel']) {
       const el = $('#' + key);
       el.checked = settings[key];
@@ -4365,7 +4350,7 @@ function applyRole() {
   if (eb) { eb.hidden = !Perm.any(); if (eb.hidden && typeof Edit !== 'undefined' && Edit.on) Edit.toggle(false); }
   const ar = $('#adminRow');
   if (ar) ar.hidden = !settings.driveEditor;
-  // layout files, show packs and the Drive connection: only for people who can edit the Drive folder
+  // layout files: only for people who can edit the Drive folder
   const adv = $('#advanced');
   if (adv) adv.hidden = !settings.driveEditor;
   // the Publish tab: for organizers and team music volunteers
