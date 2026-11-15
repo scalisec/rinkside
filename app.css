@@ -416,6 +416,8 @@ body.editing .pad:not(.add-tile) { outline: 2px dashed rgba(242, 193, 78, .55); 
 body.editing .hero-pad { outline: 2px dashed rgba(242, 193, 78, .7); outline-offset: -4px; }
 .banner.edit { border-style: solid; background: rgba(242, 193, 78, .08); }
 .section-title .mini { margin-left: 8px; letter-spacing: 0; text-transform: none; font: 600 13px/1 var(--body); color: var(--text); }
+.search-title { color: var(--live); } /* 3.10 */
+.search-title .mini { min-height: 40px; }
 .add-tile {
   align-items: center; justify-content: center; text-align: center; gap: 4px;
   background: transparent; color: var(--warn); border: 2px dashed var(--warn); box-shadow: none;

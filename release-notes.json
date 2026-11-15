@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.10.0",
+    "date": "2026-11-15",
+    "notes": [
+      {
+        "type": "improved",
+        "text": "Search keeps your screen in place: GOAL!, Pregame, Game music and the Whistles stay where they are, and the songs that match show where the music goes (on the right on a tablet, under the Whistles on a phone). In the Music Planner, tap + on a match to line it up. Tap Clear search, or any music tab, to go back. The Classic view works as before."
+      }
+    ]
+  },
+  {
     "version": "3.9.1",
     "date": "2026-11-09",
     "quiet": true,

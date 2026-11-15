@@ -53,7 +53,7 @@ const DEFAULTS = {
   upAuto: true,            // 3.9: Music Planner: start the next song in Up next when one ends
 };
 
-const APP_VERSION = '3.9.1';
+const APP_VERSION = '3.10.0';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -1057,7 +1057,7 @@ const Planner = {
   },
 
   /* ---------- drawing ---------- */
-  showing() { return UI.view === 'gameday' && !UI.query && UI.gdMode() === 'planner'; },
+  showing() { return UI.view === 'gameday' && UI.gdMode() === 'planner'; }, // 3.10: also while searching (results keep their +)
   render() {
     if (this.showing()) UI.renderMain();
     if ($('#plSheet')?.open) this.sheetRender();
@@ -1604,7 +1604,7 @@ const UI = {
     $('#search').addEventListener('input', e => { this.query = e.target.value.trim(); this.renderMain(); });
     // 3.5: turning a tablet (or resizing a window) can switch Game Day between the row and the list
     let gdLast = this.gdMode() + this.plWide();
-    addEventListener('resize', () => { const m = this.gdMode() + this.plWide(); if (m !== gdLast) { gdLast = m; if (!this.query) { this.renderTabs(); this.renderMain(); } } });
+    addEventListener('resize', () => { const m = this.gdMode() + this.plWide(); if (m !== gdLast) { gdLast = m; this.renderTabs(); this.renderMain(); } });
     $('#fadeAll').addEventListener('click', () => { buzz(); fadeAll(); });
     $('#stopAll').addEventListener('click', () => { buzz(); stopAll(); });
     $('#pauseAll').addEventListener('click', () => { buzz(); togglePause(); });
@@ -1749,7 +1749,8 @@ const UI = {
 
   uiAction(act, el) {
     if (act === 'pl') { Planner.act(el.dataset.plAct, el); return; }
-    if (act === 'gd-pick') { settings.gdTab = el.dataset.tabId; Prefs.save(); this.renderMain(); return; }
+    if (act === 'gd-pick') { settings.gdTab = el.dataset.tabId; Prefs.save(); this.clearSearch(); return; } // 3.10: picking a music tab ends a search
+    if (act === 'clear-search') { this.clearSearch(); $('#main .gd-scroll')?.scrollTo(0, 0); return; }
     if (act === 'settings') Settings.open();
     if (act === 'drive') { Settings.open('updates'); setTimeout(() => { $('#driveSection').scrollIntoView({ block: 'start' }); if (Drive.ready()) $('#driveCheck').click(); }, 50); }
     if (act === 'tab-settings') Edit.tab(Show.tab(el.dataset.tabId));
@@ -1815,41 +1816,61 @@ const UI = {
       + (sec.items.length ? `<div class="grid${sec.big ? ' big' : ''}${extra}">${sec.items.map(i => this.padHtml(i)).join('')}</div>`
         : `<p class="hint">Nothing here yet. Tap Edit groups to add some.</p>`);
   },
+  clearSearch() { $('#search').value = ''; this.query = ''; this.renderMain(); },
+  // songs whose name matches the search box, each song once
+  searchHits() {
+    const q = this.query.toLowerCase(), seen = new Set(), hits = [];
+    for (const t of Show.visibleTabs(false)) for (const i of t.items) {
+      const k = i.type === 'sound' ? keyOf(i) : i.id;
+      if (i.type === 'next' || seen.has(k)) continue;
+      if (i.name.toLowerCase().includes(q)) { seen.add(k); hits.push(i); }
+    }
+    return hits;
+  },
+  searchTitle(n) {
+    return `<h2 class="section-title search-title">${n} match${n === 1 ? '' : 'es'} for “${esc(this.query)}”<button class="mini" data-ui="clear-search">${ICONS.x}Clear search</button></h2>`;
+  },
   renderGameDay(main, banner) {
     const mode = this.gdMode();
     const secs = gameDaySections(), wh = secs[0], rest = secs.slice(1).filter(sec => sec.items.length || (Edit.on && sec.editable));
     const tabs = this.gdTabs(), cur = this.gdCurrent(tabs);
     const plan = mode === 'planner', wide = plan && this.plWide();
-    const key = mode + wide + '|' + (cur?.id || '') + '|' + (Teams.current?.id || '');
+    const q = this.query; // 3.10: a search shows its matches where the music goes; the rest of the screen stays
+    const key = mode + wide + '|' + (cur?.id || '') + '|' + (Teams.current?.id || '') + '|' + q;
     const keep = {};
     for (const sel of ['.gd-scroll', '.gd-list', '.gd-top', '.gd-chips', '.pl-panel', '.pl-steps-edit']) { const e = main.querySelector(sel); if (e) keep[sel] = [e.scrollTop, e.scrollLeft]; }
     const same = this._gdKey === key; this._gdKey = key;
-    const tabBtn = t => `<button class="tab" role="tab" data-ui="gd-pick" data-tab-id="${esc(t.id)}" aria-selected="${t === cur}"
+    const tabBtn = t => `<button class="tab" role="tab" data-ui="gd-pick" data-tab-id="${esc(t.id)}" aria-selected="${t === cur && !q}"
         style="--c:${esc(t.color || '#4d4d4d')};--on:${hexLight(t.color) ? '#0b131a' : '#fff'}"><i></i><span class="gd-name">${esc(t.name)}</span><em class="num">${t.items.length}</em></button>`;
     const top = this.heroHtml() + this.sectionHtml(wh, ' whistles');
-    const music = (cur
+    const hits = q ? this.searchHits().slice(0, 150) : null;
+    const music = q
+      ? this.searchTitle(this.searchHits().length) + (hits.length ? (plan ? `<div class="grid pl-grid">${Planner.gridHtml(hits)}</div>` : `<div class="grid">${hits.map(i => this.padHtml(i)).join('')}</div>`) : `<p class="hint">No songs match. Check the spelling, or tap Clear search.</p>`)
+      : (cur
       ? `<h2 class="section-title gd-title">${esc(cur.name)}<span>${cur.items.length}</span></h2>`
         + (cur.items.length ? (plan ? `<div class="grid pl-grid">${Planner.gridHtml(cur.items)}</div>` : `<div class="grid">${cur.items.map(i => this.padHtml(i)).join('')}</div>`) : `<p class="hint">This tab is empty.</p>`)
       : `<p class="hint">No music tabs yet. Tap Check for updates in Settings.</p>`)
       + rest.map(sec => this.sectionHtml(sec)).join('');
+    const chips = `<div class="gd-pick"><div class="gd-chips" role="tablist" aria-label="Music">${tabs.map(tabBtn).join('')}</div></div>`;
+    const chipsRow = q ? '' : chips; // 3.10: while searching, the matches take the place of the music chips (as in the approved mockup)
     let html;
     const editBanner = plan && Planner.editing ? `<div class="banner pl-banner"><div><strong>${Planner.editing === 'team' ? 'Changing the team\'s starting plan.' : 'Changing your plan (this device only).'}</strong>
       <p>Tap a song or playlist below to add it as a moment. Tap Done in the plan when you're finished.</p></div></div>` : '';
     if (wide) {
       html = `<div class="gd-top">${top}</div>
-        <div class="gd-scroll">${banner}${editBanner}<div class="gd-pick"><div class="gd-chips" role="tablist" aria-label="Music">${tabs.map(tabBtn).join('')}</div></div>${music}</div>
+        <div class="gd-scroll">${banner}${editBanner}${chipsRow}${music}</div>
         <aside class="pl-panel" aria-label="Game plan and Up next">${Planner.panelHtml(true)}</aside>`;
     } else if (plan) {
       html = `<div class="gd-top">${top}</div>
         <div class="gd-scroll">${banner}<section class="pl-strip${Planner.editing ? ' pl-panel' : ''}" aria-label="Game plan and Up next">${Planner.panelHtml(!!Planner.editing)}</section>${editBanner}
-        <div class="gd-pick"><div class="gd-chips" role="tablist" aria-label="Music">${tabs.map(tabBtn).join('')}</div></div>${music}</div>`;
+        ${chipsRow}${music}</div>`;
     } else if (mode === 'list') {
       html = `<div class="gd-top">${top}</div>
         <nav class="gd-list" role="tablist" aria-label="Music"><h2 class="section-title">Music<span>${tabs.length} tabs</span></h2>${tabs.map(tabBtn).join('')}</nav>
         <div class="gd-scroll">${banner}${music}</div>`;
     } else {
       html = `<div class="gd-top">${top}</div>
-        <div class="gd-scroll">${banner}<div class="gd-pick"><div class="gd-chips" role="tablist" aria-label="Music">${tabs.map(tabBtn).join('')}</div></div>${music}</div>`;
+        <div class="gd-scroll">${banner}${chipsRow}${music}</div>`;
     }
     main.classList.add('gd'); main.classList.toggle('gd-row-mode', mode !== 'list' && !wide); main.classList.toggle('gd-list-mode', mode === 'list');
     main.classList.toggle('gd-plan-mode', plan); main.classList.toggle('gd-plan-wide', wide);
@@ -1948,17 +1969,10 @@ const UI = {
     const classic = this.gdMode() === 'classic'; // 3.5: Classic = the 3.4 Game Day, tab row always shown
     document.body.classList.toggle('gd-classic', classic);
     if (!Edit.on && !classic && this.view !== 'gameday') this.view = 'gameday';
-    if (this.query || this.view !== 'gameday' || classic) { main.classList.remove('gd', 'gd-row-mode', 'gd-list-mode', 'gd-plan-mode', 'gd-plan-wide'); document.body.classList.remove('gd-list-app'); }
+    if (this.view !== 'gameday' || classic) { main.classList.remove('gd', 'gd-row-mode', 'gd-list-mode', 'gd-plan-mode', 'gd-plan-wide'); document.body.classList.remove('gd-list-app'); }
     let html = this.banner();
-    if (this.query) {
-      const q = this.query.toLowerCase();
-      const seen = new Set();
-      const hits = [];
-      for (const t of Show.visibleTabs(false)) for (const i of t.items) {
-        const k = i.type === 'sound' ? keyOf(i) : i.id;
-        if (i.type === 'next' || seen.has(k)) continue;
-        if (i.name.toLowerCase().includes(q)) { seen.add(k); hits.push(i); }
-      }
+    if (this.query && (classic || this.view !== 'gameday')) { // Classic and Edit tabs: the matches take the whole page (as before)
+      const hits = this.searchHits();
       html += `<h2 class="section-title">${hits.length} match${hits.length === 1 ? '' : 'es'} for “${esc(this.query)}”</h2>`;
       html += `<div class="grid">${hits.slice(0, 150).map(i => this.padHtml(i)).join('')}</div>`;
     } else if (this.view === 'gameday' && !classic) {
