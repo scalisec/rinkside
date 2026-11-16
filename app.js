@@ -52,7 +52,7 @@ const DEFAULTS = {
   autoLevel: true,         // 3.8: play songs with the Even out volume fix saved in the layout
 };
 
-const APP_VERSION = '3.11.0';
+const APP_VERSION = '3.12.0';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -1196,11 +1196,25 @@ async function playSound(sound, { preview = false } = {}) {
 function playGroup(group) {
   const avail = group.sounds.filter(s => Library.has(s));
   if (!avail.length) { UI.toast(`No songs for “${group.name}” are on this device yet.`); return; }
-  const live = tracks.find(t => group.sounds.includes(t.sound) && t.state === 'playing' && !t.playlist);
+  // 3.12: a tab's Random button only fades out the song it started (not one tapped on its own button)
+  const live = tracks.find(t => group.sounds.includes(t.sound) && t.state === 'playing' && !t.playlist && (!group.tabRandom || t.sound.id === tabRandomLast[group.id]));
   if (live) { live.fadeOut(); return; }
   const fresh = settings.skipPlayed ? avail.filter(s => !played.has(keyOf(s))) : avail;
   const pool = fresh.length ? fresh : avail;
-  playSound(pool[Math.floor(Math.random() * pool.length)]);
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+  if (group.tabRandom) tabRandomLast[group.id] = pick.id;
+  playSound(pick);
+}
+const tabRandomLast = {}; // 3.12: the song each tab's Random button started last
+
+/* 3.12: the first button of every music tab: plays a random song from that tab that hasn't played yet this
+   game (like the Whistles). Made from the tab's songs on the spot; nothing is saved in the layout. Not shown
+   in Edit, while searching, or for a tab with fewer than 2 songs (the Playlists tab has none). */
+function tabRandom(tab) {
+  if (!tab || Edit.on) return null;
+  const sounds = tab.items.filter(i => i.type === 'sound');
+  if (sounds.length < 2) return null;
+  return { id: 'rnd:' + tab.id, type: 'group', tabRandom: true, name: 'Random ' + tab.name, eyebrow: 'Whole tab', cssColor: tab.color || '#4d4d4d', sounds };
 }
 
 /* A playlist is a queue that survives interruptions: fading it out keeps its
@@ -1506,6 +1520,7 @@ const UI = {
       + (sec.items.length ? `<div class="grid${sec.big ? ' big' : ''}${extra}">${sec.items.map(i => this.padHtml(i)).join('')}</div>`
         : `<p class="hint">Nothing here yet. Tap Edit groups to add some.</p>`);
   },
+  tabRandomHtml(tab) { const r = tabRandom(tab); return r ? this.padHtml(r) : ''; }, // 3.12
   clearSearch() { $('#search').value = ''; this.query = ''; this.renderMain(); },
   // songs whose name matches the search box, each song once
   searchHits() {
@@ -1537,7 +1552,7 @@ const UI = {
       ? this.searchTitle(this.searchHits().length) + (hits.length ? `<div class="grid">${hits.map(i => this.padHtml(i)).join('')}</div>` : `<p class="hint">No songs match. Check the spelling, or tap Clear search.</p>`)
       : (cur
       ? `<h2 class="section-title gd-title">${esc(cur.name)}<span>${cur.items.length}</span></h2>`
-        + (cur.items.length ? `<div class="grid">${cur.items.map(i => this.padHtml(i)).join('')}</div>` : `<p class="hint">This tab is empty.</p>`)
+        + (cur.items.length ? `<div class="grid">${this.tabRandomHtml(cur)}${cur.items.map(i => this.padHtml(i)).join('')}</div>` : `<p class="hint">This tab is empty.</p>`)
       : `<p class="hint">No music tabs yet. Tap Check for updates in Settings.</p>`)
       + rest.map(sec => this.sectionHtml(sec)).join('');
     const chips = `<div class="gd-pick"><div class="gd-chips" role="tablist" aria-label="Music">${tabs.map(tabBtn).join('')}</div></div>`;
@@ -1580,7 +1595,8 @@ const UI = {
     } else if (item.type === 'group') {
       const avail = item.sounds.filter(s => Library.has(s));
       const fresh = avail.filter(s => !played.has(keyOf(s))).length;
-      top = `<span class="eyebrow">${ICONS.shuffle}Random</span><span class="name">${esc(item.name)}</span>`;
+      if (item.tabRandom) cls.push('tab-random');
+      top = `<span class="eyebrow">${ICONS.shuffle}${esc(item.eyebrow || 'Random')}</span><span class="name">${esc(item.name)}</span>`;
       meta = `<span class="count">${fresh} of ${item.sounds.length} fresh</span><span class="dots">${item.sounds.map(s => `<i class="${played.has(keyOf(s)) ? 'used' : ''}"></i>`).join('')}</span>`;
     } else if (item.type === 'playlist') {
       top = `<span class="eyebrow">${ICONS.list}Playlist</span><span class="name">${esc(item.name)}</span>`;
@@ -1675,7 +1691,7 @@ const UI = {
           <button class="pad add-tile" data-ui="add-playlist" data-tab-id="${esc(tab.id)}">${ICONS.list}<span>Add playlist</span></button>
           <button class="pad add-tile" data-ui="add-next" data-tab-id="${esc(tab.id)}">${ICONS.next}<span>Add Next-song button</span></button>`;
       }
-      html += `<div class="grid"${mine ? ` data-reorder="${esc(tab.id)}"` : ''}>${tab.items.map(i => this.padHtml(i)).join('')}${tiles}</div>`;
+      html += `<div class="grid"${mine ? ` data-reorder="${esc(tab.id)}"` : ''}>${this.tabRandomHtml(tab)}${tab.items.map(i => this.padHtml(i)).join('')}${tiles}</div>`;
       if (mine && tab.items.length > 1) html += `<p class="hint drag-hint">To move a button, press and hold it, then drag it to its new spot.</p>`;
       if (!tab.items.length && !Edit.on) html += `<p class="hint">This tab is empty. Tap Edit, then Add songs.</p>`;
     }
@@ -1693,7 +1709,7 @@ const UI = {
         on = live.has(item.id);
         el.classList.toggle('is-played', played.has(keyOf(item)) && !el.classList.contains('hero-pad'));
       } else if (item.type === 'group') {
-        on = item.sounds.some(s => live.has(s.id));
+        on = item.tabRandom ? live.has(tabRandomLast[item.id]) && item.sounds.some(s => s.id === tabRandomLast[item.id]) : item.sounds.some(s => live.has(s.id));
         const avail = item.sounds.filter(s => Library.has(s));
         const c = el.querySelector('.count');
         if (c) c.textContent = `${avail.filter(s => !played.has(keyOf(s))).length} of ${item.sounds.length} fresh`;

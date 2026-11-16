@@ -294,6 +294,8 @@ body.locked .admin { display: none !important; }
 .pad.is-missing .meta span:first-child::before { content: "File not loaded "; }
 .pad.playlist, .pad.next { box-shadow: inset 0 0 0 2px rgba(255,255,255,.22); }
 .pad.group .name { font-size: 30px; }
+.pad.tab-random .name { font-size: 24px; } /* 3.12: Random <tab> first in each music tab */
+.pad.tab-random .dots { display: none; }
 
 /* ---------- Dock (now playing) ---------- */
 .dock {
@@ -532,6 +534,7 @@ dialog.help { width: min(720px, calc(100% - 32px)); }
   .pad { min-height: 88px; }
   .grid.big .pad .name { font-size: 21px; }
   .pad.group .name { font-size: 24px; }
+  .pad.tab-random .name { font-size: 20px; }
   .hero { gap: 8px; }
   .hero-pad { min-height: 118px; padding: 12px; }
   .hero-big { font-size: 50px; }
