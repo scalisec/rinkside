@@ -1,5 +1,20 @@
 [
   {
+    "version": "3.11.0",
+    "date": "2026-11-16",
+    "quiet": true,
+    "notes": [
+      {
+        "type": "improved",
+        "text": "A simpler app: the Music Planner view is gone (nobody was using it). Change view offers Default again: Portrait on phones, Landscape on tablets. A device that had the Music Planner picked switches to Default by itself. Songs, layouts and everything else stay the same."
+      },
+      {
+        "type": "fixed",
+        "text": "If Rinkside ever can't open on the first try, it now tries again by itself and shows a Try again button, instead of a \"This site can't be reached\" page. Help notes when and why, so it can be fixed."
+      }
+    ]
+  },
+  {
     "version": "3.10.0",
     "date": "2026-11-15",
     "notes": [
