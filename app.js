@@ -52,7 +52,7 @@ const DEFAULTS = {
   autoLevel: true,         // 3.8: play songs with the Even out volume fix saved in the layout
 };
 
-const APP_VERSION = '3.12.0';
+const APP_VERSION = '3.12.1';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -260,6 +260,9 @@ const Show = {
     return show.tabs.filter(t => (t.team ? t.team === team : (all || !hidden.has(t.id))));
   },
   // songs and playlists for the team that's picked now (Game Day groups, goal horns, pickers)
+  // 3.12.1: every song button in the visible tabs, including a second button for the same song (for example
+  // "Icing - Cold As Ice" next to "Cold As Ice" in Rock), so a song can be in a group and in its own tab
+  visibleSoundButtons() { return this.visibleTabs(false).flatMap(t => t.items.filter(i => i.type === 'sound')); },
   visibleSounds() {
     const seen = new Set(), out = [];
     for (const t of this.visibleTabs(false)) for (const i of t.items) if (i.type === 'sound') { const k = keyOf(i); if (!seen.has(k)) { seen.add(k); out.push(i); } }
@@ -940,16 +943,18 @@ const startsWith = (s, prefix) => {
   return !!p && s.name.toLowerCase().startsWith(p);
 };
 
+const uniqSongs = list => { const seen = new Set(); return list.filter(s => { const k = keyOf(s); if (seen.has(k)) return false; seen.add(k); return true; }); };
+
 function gameDaySections() {
-  const all = Show.visibleSounds();
+  const all = Show.visibleSoundButtons(); // 3.12.1: not one button per song, so group copies count (each group still lists a song once)
   const gd = show.gameday;
   const groups = (list, key) => list.map((g, i) => ({
     id: `g:${key}:${i}`, type: 'group', name: g.label || g.prefix, cssColor: g.color,
-    sounds: all.filter(s => startsWith(s, g.prefix)),
+    sounds: uniqSongs(all.filter(s => startsWith(s, g.prefix))),
   }));
   const out = [];
   out.push({ key: 'situations', title: 'Whistles', big: true, items: groups(gd.situations, 's'), editable: true });
-  out.push({ key: 'moments', title: 'Moments', items: all.filter(s => gd.moments.some(p => startsWith(s, p))), editable: true });
+  out.push({ key: 'moments', title: 'Moments', items: uniqSongs(all.filter(s => gd.moments.some(p => startsWith(s, p)))), editable: true });
   const pls = Show.visiblePlaylists();
   if (pls.length) out.push({ key: 'playlists', title: 'Playlists', items: [{ id: 'next', type: 'next', name: 'Next song', color: '#bfef45' }, ...pls] });
   out.push({ key: 'endings', title: 'Game over', big: true, items: groups(gd.endings, 'e'), editable: true });
@@ -1212,7 +1217,7 @@ const tabRandomLast = {}; // 3.12: the song each tab's Random button started las
    in Edit, while searching, or for a tab with fewer than 2 songs (the Playlists tab has none). */
 function tabRandom(tab) {
   if (!tab || Edit.on) return null;
-  const sounds = tab.items.filter(i => i.type === 'sound');
+  const sounds = uniqSongs(tab.items.filter(i => i.type === 'sound')); // 3.12.1: a song with two buttons in the tab counts once
   if (sounds.length < 2) return null;
   return { id: 'rnd:' + tab.id, type: 'group', tabRandom: true, name: 'Random ' + tab.name, eyebrow: 'Whole tab', cssColor: tab.color || '#4d4d4d', sounds };
 }
