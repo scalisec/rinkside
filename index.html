@@ -103,6 +103,7 @@
     <section class="spanel" id="spanel-publish" role="tabpanel" aria-labelledby="stab-publish" data-panel="publish" hidden>
     <div id="publishBox" class="publish" hidden>
       <p class="hint">Sends your changes, and any songs you added, to Google Drive. Volunteers get them the next time they tap Check for updates. Nothing in Drive is deleted, and Drive keeps earlier versions.</p>
+      <div class="add-song-row" id="addSongRow" hidden><span class="pub-text"><b>Add a song</b><small>Pick a song file, choose its tab and where it starts. It goes into that tab's Google Drive folder when you publish.</small></span><button id="addSongBtn" class="btn">Add a song</button></div>
       <div id="pubTargets" class="pub-targets">
         <div class="pub-row" id="pubBaseRow" data-target="base">
           <span class="pub-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
@@ -286,6 +287,8 @@
 
     <div id="helpOrganizer" hidden>
     <h3>For organizers</h3>
+    <details><summary>How do I add a new song?</summary>
+      <p><b>Settings › Publish › Add a song</b>. Pick the song file, check its name and artist, pick its music tab (that's also its Google Drive folder), and tick any Whistles or Moments it should also play from. Tap <b>Next</b>, play it and tap <b>Start here</b> at the catchy part, then <b>Add to Rinkside</b> and <b>Publish now</b>. Other phones and tablets get it with <b>Check for updates</b>.</p></details>
     <p class="hint"><b>Settings › Publish</b> shows each place you can publish to and what changed. <b>Admin</b> (in the same tab) shows every team, who has access, and what needs attention. New songs you put in Drive get buttons when you tap Check for updates. To give a tab's new songs a colour (say, orange for Halloween): Edit › Tab settings › Colour for new buttons. To move a button, tap Edit, then press and hold it and drag. <b>Even out volume</b>: new songs you add are measured and evened out by themselves. For the songs already there, do a one-time check: <b>Settings › Playback › Review song volume</b>, tap Measure, untick any you'd rather leave alone, tap Apply, then Publish. To change one song, tap it in Edit: tick or untick <b>Even out this button</b>, or use its Volume slider. The full guide covers publishing, Admin and the layout file.</p>
     </div>
 
@@ -298,6 +301,39 @@
 </dialog>
 
 <!-- ============ A question that needs an answer (e.g. songs already on this device) ============ -->
+<!-- 3.13: Add a song (organizers, from Settings › Publish) -->
+<dialog id="addSong" class="add-song" aria-labelledby="asTitle">
+  <div class="dlg-head"><h2 id="asTitle">Add a song</h2></div>
+  <div class="dlg-body">
+    <div class="as-steps" aria-hidden="true"><span></span><span></span><span></span></div>
+    <section data-as="1">
+      <label class="as-file"><input type="file" id="asFile" accept="audio/*,.mp3,.m4a,.wav">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        <span><b id="asFileName">Pick a song file</b><small id="asFileInfo">MP3, M4A or WAV, from this phone, tablet or computer</small></span><span class="mini" id="asFilePick">Pick</span></label>
+      <div class="as-two"><label class="field">Song name<input type="text" id="asTitleIn" autocomplete="off"></label><label class="field">Artist<input type="text" id="asArtist" autocomplete="off"></label></div>
+      <label class="field">Music tab (also its Google Drive folder)<select id="asTab"></select></label>
+      <label class="field" id="asNewTabRow" hidden>Name of the new tab<input type="text" id="asNewTab" autocomplete="off"></label>
+      <div class="field">Also play it from these Whistles or Moments (optional)<div class="as-chips" id="asGroups"></div></div>
+      <p class="hint warn-text" id="asErr1" hidden></p>
+      <div class="as-foot"><button type="button" class="btn" data-as-act="cancel">Cancel</button><button type="button" class="btn primary" data-as-act="next">Next: where it starts</button></div>
+    </section>
+    <section data-as="2" hidden>
+      <p class="as-lead">Play it, then tap <b>Start here</b> at the part the crowd should hear first.</p>
+      <div class="as-tl" id="asTl"><div class="as-bars" id="asBars"></div><div class="as-pos" id="asPos"></div><div class="as-mark" id="asMark"><span id="asMarkLbl">Start 0:00</span></div></div>
+      <input type="range" id="asSeek" min="0" max="1" step="0.1" value="0" aria-label="Position in the song">
+      <div class="as-times"><span id="asNow">0:00</span><span id="asLen">0:00</span></div>
+      <div class="as-row"><button type="button" class="btn primary" id="asPlay">Play</button><button type="button" class="mini" data-as-act="back5">− 5 s</button><button type="button" class="mini" data-as-act="fwd5">+ 5 s</button><button type="button" class="btn" data-as-act="mark">Start here</button></div>
+      <p class="hint">Volume is evened out automatically, like your other songs. You can change the start later in Edit.</p>
+      <div class="as-foot"><button type="button" class="btn" data-as-act="back">Back</button><button type="button" class="btn primary" data-as-act="add">Add to Rinkside</button></div>
+    </section>
+    <section data-as="3" hidden>
+      <div class="as-row"><span class="as-ok" aria-hidden="true">✓</span><div><b class="as-done" id="asDoneTitle"></b><br><span class="hint" id="asDoneText"></span></div></div>
+      <ul class="as-list" id="asDoneList"></ul>
+      <div class="as-foot"><button type="button" class="btn" data-as-act="again">Add another song</button><button type="button" class="btn primary" data-as-act="publish">Publish now</button></div>
+    </section>
+  </div>
+</dialog>
+
 <dialog id="ask" class="ask" aria-labelledby="askTitle">
   <div class="dlg-head"><h2 id="askTitle"></h2></div>
   <div class="dlg-body">

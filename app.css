@@ -976,3 +976,39 @@ body.gd-list-app .pl-actions .mini { min-height: 36px; padding: 5px 9px; }
   .lvl-row { grid-template-columns: minmax(0, 1fr) 80px; }
   .lvl-fix { grid-column: 1 / -1; padding-left: 30px; }
 }
+
+/* 3.13: Add a song (Settings › Publish, organizers) */
+.add-song-row { display: flex; align-items: center; gap: 12px; padding: 12px; margin: 0 0 14px; border: 1px solid var(--line-solid); border-radius: 12px; background: var(--raised); }
+.add-song-row .pub-text { flex: 1; display: grid; gap: 2px; }
+.add-song-row small { color: var(--muted); }
+dialog.add-song { width: min(560px, calc(100% - 32px)); }
+.as-steps { display: flex; gap: 6px; margin: 0 0 14px; }
+.as-steps span { flex: 1; height: 4px; border-radius: 2px; background: var(--line-solid); }
+.as-steps span.on { background: var(--live); }
+.as-file { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--line-solid); border-radius: 12px; background: var(--raised); margin-bottom: 12px; cursor: pointer; position: relative; }
+.as-file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.as-file > svg { width: 28px; height: 28px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; }
+.as-file > span:not(.mini) { flex: 1; min-width: 0; display: grid; }
+.as-file b { color: var(--text); overflow-wrap: anywhere; }
+.as-file small { color: var(--muted); }
+.as-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.as-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.as-chip { min-height: 40px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line-solid); background: none; color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
+.as-chip[aria-pressed="true"] { background: var(--live); border-color: var(--live); color: #062230; font-weight: 600; }
+.as-chip[aria-pressed="true"]::before { content: '✓ '; }
+.as-lead { margin: 0 0 6px; }
+.as-tl { position: relative; height: 64px; border-radius: 10px; background: var(--raised); border: 1px solid var(--line-solid); margin: 6px 0 2px; overflow: hidden; }
+.as-bars { position: absolute; inset: 6px 4px; display: flex; align-items: flex-end; gap: 1px; }
+.as-bars i { flex: 1; background: #3b5268; border-radius: 1px; }
+.as-pos { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255, 255, 255, .7); }
+.as-mark { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--live); }
+.as-mark span { position: absolute; top: 4px; left: 6px; font-size: 12px; font-weight: 700; color: var(--live); white-space: nowrap; }
+#asSeek { width: 100%; margin: 6px 0 0; }
+.as-times { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+.as-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.as-ok { font-size: 40px; line-height: 1; color: #47d16c; }
+.as-done { font-size: 20px; color: var(--text); }
+.as-list { margin: 14px 0 0 18px; color: var(--muted); line-height: 1.6; }
+.as-list b { color: var(--text); }
+.as-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+@media (max-width: 480px) { .as-two { grid-template-columns: 1fr; } }

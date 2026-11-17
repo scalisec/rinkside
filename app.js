@@ -52,7 +52,7 @@ const DEFAULTS = {
   autoLevel: true,         // 3.8: play songs with the Even out volume fix saved in the layout
 };
 
-const APP_VERSION = '3.12.1';
+const APP_VERSION = '3.13.0';
 
 /* Google Drive sync (Settings › Get Most Recent Updates).
    folder:   the Drive folder holding the layout file (.rinkside.json) and the music folders.
@@ -3411,7 +3411,7 @@ const Settings = {
     };
     // Publish: the shared library (organizer) or a team (its music volunteer)
     const packShow = p => ({ tabs: p.tabs, teams: [p.team], gameday: { situations: [], moments: [], endings: [] } });
-    const startPublish = async target => {
+    const startPublish = async (target, auto = false) => { // 3.13: auto = straight on to Publish now (Add a song), unless something needs a decision
       if (Drive.busy) return;
       $('#pubPlan').hidden = true; $('#drivePlan').hidden = true;
       busy(true); $('#driveStopRow').hidden = true;
@@ -3485,6 +3485,7 @@ const Settings = {
         }
         lines.push('Nothing in Drive is deleted.');
         $('#pubPlanText').textContent = lines.join(' ');
+        if (auto) { setTimeout(() => $('#pubGo').click(), 0); return; }
         $('#pubPlan').hidden = false; say('');
         $('#pubPlan').scrollIntoView({ block: 'center' });
       } catch (err) {
@@ -3624,6 +3625,151 @@ const Settings = {
 /* Admin (organizers): 3.3 redesign with three tabs. "Check again" reads, once, who each folder is
    shared with, the songs in it and its last publish; the Teams, People and Shared library tabs are
    all drawn from that. Adding or removing people is done in Google Drive (Share). */
+/* 3.13: Add a song (organizers only, Settings › Publish). One song at a time: pick the file, name it, pick its
+   tab (which is also its Drive folder: Publish uploads a new song into Hockey Songs/<tab name>), tick any
+   Whistles or Moments it should also play from, set where it starts, then Publish now. Group copies are
+   buttons named "<group> - <song>" in the tab where that group's songs already live, like the others. */
+const AddSong = {
+  file: null, url: null, audio: null, len: 0, start: 0, timer: null,
+  init() {
+    $('#addSongBtn').addEventListener('click', () => this.open());
+    $('#asFile').addEventListener('change', e => this.pick(e.target.files[0]));
+    $('#asTab').addEventListener('change', () => { $('#asNewTabRow').hidden = $('#asTab').value !== 'new'; });
+    $('#asGroups').addEventListener('click', e => { const b = e.target.closest('[data-g]'); if (b) b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true')); });
+    $('#asSeek').addEventListener('input', e => { const v = +e.target.value; if (this.audio) this.audio.currentTime = v; this.show(v); });
+    $('#asPlay').addEventListener('click', () => this.playPause());
+    $('#addSong').addEventListener('click', e => { const b = e.target.closest('[data-as-act]'); if (b) this.act(b.dataset.asAct); });
+    $('#addSong').addEventListener('close', () => this.stop(true));
+  },
+  open() {
+    this.reset();
+    const tabs = Show.visibleTabs(false).filter(t => !t.team && !(t.items.length && t.items.every(i => i.type === 'playlist'))).map(t => Show.tab(t.id) || t); // not the Playlists tab
+    const cur = Show.tab(settings.gdTab);
+    $('#asTab').innerHTML = tabs.map(t => `<option value="${esc(t.id)}"${cur && cur.id === t.id ? ' selected' : ''}>${esc(t.name)}</option>`).join('') + '<option value="new">New tab…</option>';
+    $('#asNewTabRow').hidden = true; $('#asNewTab').value = '';
+    $('#asGroups').innerHTML = this.groups().map(g => `<button type="button" class="as-chip" data-g="${esc(g.prefix)}" aria-pressed="false">${esc(g.label)}</button>`).join('');
+    this.step(1);
+    $('#addSong').showModal();
+  },
+  // Whistles and Moments, by the start of the button name they use
+  groups() {
+    const gd = show.gameday || {}, seen = new Set(), out = [];
+    for (const g of gd.situations || []) if (g.prefix && !seen.has(g.prefix.toLowerCase())) { seen.add(g.prefix.toLowerCase()); out.push({ prefix: g.prefix.trim(), label: g.label || g.prefix }); }
+    for (const m of gd.moments || []) if (m && !seen.has(m.toLowerCase())) { seen.add(m.toLowerCase()); out.push({ prefix: m.trim(), label: m.trim() }); }
+    return out;
+  },
+  reset() {
+    this.stop(true); this.file = null; this.len = 0; this.start = 0;
+    $('#asFile').value = ''; $('#asFileName').textContent = 'Pick a song file'; $('#asFileInfo').textContent = 'MP3, M4A or WAV, from this phone, tablet or computer';
+    $('#asTitleIn').value = ''; $('#asArtist').value = ''; $('#asErr1').hidden = true; $('#asBars').innerHTML = '';
+  },
+  async pick(f) {
+    if (!f) return;
+    if (!AUDIO_EXT.test(f.name)) { this.err('That isn\'t a song file. Pick an MP3, M4A or WAV file.'); return; }
+    this.stop(true); this.file = f; this.start = 0; $('#asErr1').hidden = true;
+    const base = prettyName(f.name), parts = base.split(/\s+[-–—]\s+/);
+    $('#asTitleIn').value = parts[0] || base; $('#asArtist').value = parts.slice(1).join(' - ');
+    $('#asFileName').textContent = f.name;
+    this.len = await probeDuration(f);
+    $('#asFileInfo').textContent = `${size$(f.size)}${this.len ? ' · ' + fmt(this.len) : ''}`;
+    this.bars(f);
+  },
+  // a rough picture of the song's loud and quiet parts, to help find the start (skipped if it can't be read)
+  async bars(f) {
+    $('#asBars').innerHTML = '';
+    try {
+      const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      const buf = await new Ctx(1, 44100, 44100).decodeAudioData(await f.arrayBuffer());
+      if (this.file !== f) return;
+      const d = buf.getChannelData(0), n = 120, step = Math.floor(d.length / n) || 1, peaks = [];
+      for (let i = 0; i < n; i++) { let m = 0; for (let j = i * step, e = Math.min(d.length, j + step); j < e; j += 50) m = Math.max(m, Math.abs(d[j])); peaks.push(m); }
+      const top = Math.max(...peaks) || 1;
+      $('#asBars').innerHTML = peaks.map(v => `<i style="height:${Math.max(6, Math.round(v / top * 100))}%"></i>`).join('');
+    } catch (e) {}
+  },
+  err(msg) { $('#asErr1').textContent = msg; $('#asErr1').hidden = false; },
+  step(n) {
+    document.querySelectorAll('#addSong [data-as]').forEach(s => { s.hidden = s.dataset.as !== String(n); });
+    document.querySelectorAll('#addSong .as-steps span').forEach((s, i) => s.classList.toggle('on', i < n));
+    if (n === 2) { $('#asSeek').max = String(this.len || 600); $('#asLen').textContent = this.len ? fmt(this.len) : ''; this.show(this.start); this.mark(); } // length unknown: up to 10 minutes
+  },
+  act(a) {
+    if (a === 'cancel') { $('#addSong').close(); return; }
+    if (a === 'next') {
+      if (!this.file) { this.err('Pick a song file first.'); return; }
+      if (!$('#asTitleIn').value.trim()) { this.err('Give the song a name.'); return; }
+      if ($('#asTab').value === 'new' && !$('#asNewTab').value.trim()) { this.err('Give the new tab a name.'); return; }
+      this.step(2); return;
+    }
+    if (a === 'back') { this.stop(); this.step(1); return; }
+    if (a === 'back5' || a === 'fwd5') { const v = Math.max(0, Math.min(this.span(), this.pos() + (a === 'fwd5' ? 5 : -5))); if (this.audio) this.audio.currentTime = v; this.show(v); return; }
+    if (a === 'mark') { this.start = Math.round(this.pos() * 10) / 10; this.mark(); return; }
+    if (a === 'add') { this.add(); return; }
+    if (a === 'again') { this.open(); return; }
+    if (a === 'publish') { $('#addSong').close(); if ($('#settings').open) Settings.tab('publish'); else Settings.open('publish'); Settings.startPublish('base', true); }
+  },
+  pos() { return this.audio ? this.audio.currentTime : +$('#asSeek').value || 0; },
+  span() { return this.len || (this.audio && isFinite(this.audio.duration) ? this.audio.duration : 600); },
+  show(v) {
+    $('#asSeek').value = String(v); $('#asNow').textContent = fmt(v);
+    $('#asPos').style.left = (v / this.span() * 100) + '%';
+  },
+  mark() { $('#asMark').style.left = (this.start / this.span() * 100) + '%'; $('#asMarkLbl').textContent = 'Start ' + fmt(this.start); $('#asPlay').textContent = this.audio && !this.audio.paused ? 'Stop' : 'Play from ' + fmt(this.pos()); },
+  playPause() {
+    if (this.audio && !this.audio.paused) { this.stop(); return; }
+    if (!this.file) return;
+    if (!this.url) this.url = URL.createObjectURL(this.file);
+    const at = this.pos();
+    this.audio = this.audio || new Audio(this.url);
+    this.audio.currentTime = at;
+    this.audio.play().catch(() => {});
+    $('#asPlay').textContent = 'Stop';
+    clearInterval(this.timer); this.timer = setInterval(() => { if (this.audio) { this.show(this.audio.currentTime); if (this.audio.ended) this.stop(); } }, 200);
+  },
+  stop(all = false) {
+    clearInterval(this.timer); this.timer = null;
+    if (this.audio) { this.audio.pause(); if (all) { this.audio.removeAttribute('src'); this.audio = null; } }
+    if (all && this.url) { URL.revokeObjectURL(this.url); this.url = null; }
+    if ($('#asPlay')) $('#asPlay').textContent = 'Play from ' + fmt(+$('#asSeek').value || 0);
+  },
+  async add() {
+    this.stop();
+    const f = this.file; if (!f) return;
+    const title = $('#asTitleIn').value.trim(), artist = $('#asArtist').value.trim();
+    const song = artist ? `${title} - ${artist}` : title;
+    let tab = Show.tab($('#asTab').value);
+    if (!tab && $('#asTab').value !== 'new') { this.step(1); this.err('Pick a music tab.'); return; }
+    if (!tab) { tab = { id: uid(), name: $('#asNewTab').value.trim(), color: SWATCHES[show.tabs.length % SWATCHES.length], items: [] }; show.tabs.push(tab); }
+    const { added, failed, cancelled } = await Library.importFiles([f]);
+    if (cancelled || !added.length) { this.step(1); this.err('Nothing was added.'); return; }
+    const make = (name, where) => {
+      // "<tab>/<file>": Publish puts it in that Drive folder, whichever tab the button is in
+      const it = { type: 'sound', id: uid(), name, file: `${tab.name.replace(/[\\/]+/g, '-').trim()}/${f.name}`, start: this.start, stop: 0, volume: 1, length: this.len, color: where.newColor || null };
+      where.items.push(it); return it;
+    };
+    const picked = [...document.querySelectorAll('#asGroups [aria-pressed="true"]')].map(b => b.dataset.g);
+    const home = p => Show.visibleTabs(false).find(t => !t.team && t.items.some(i => i.type === 'sound' && startsWith(i, p)));
+    const made = [], lines = [];
+    // if a picked group lives in the chosen tab, the song's own button carries the group's name (no second button)
+    const own = picked.find(p => home(p)?.id === tab.id);
+    made.push(make(own ? `${own} - ${song}` : song, tab));
+    lines.push(`A button in the <b>${esc(tab.name)}</b> tab, starting at ${fmt(this.start)}`);
+    for (const p of picked) {
+      const label = this.groups().find(g => g.prefix === p)?.label || p;
+      if (p !== own) { const h = home(p); const where = (h && Show.tab(h.id)) || tab; made.push(make(`${p} - ${song}`, where)); }
+      lines.push(`Also plays from <b>${esc(label)}</b>`);
+    }
+    Show.changed(); Loudness.queue(made);
+    await Store.put('kv', 'show', show).catch(() => {});
+    UI.renderAll();
+    $('#asDoneTitle').textContent = `${title} is on this device`;
+    $('#asDoneText').textContent = `Tap Publish now to put it in Google Drive (Hockey Songs › ${tab.name}) so other phones and tablets get it with Check for updates.`;
+    if (failed) lines.push('This device is low on space, so the song is only kept until Rinkside closes: publish it now');
+    $('#asDoneList').innerHTML = lines.map(l => `<li>${l}</li>`).join('');
+    this.step(3);
+  },
+};
+
 const Admin = {
   PENDING: 'rinkside.pendingTeams',
   view: 'teams', filter: 'all', q: '', pq: '', sel: null, model: null, edits: {},
@@ -4046,6 +4192,7 @@ function applyRole() {
   if (pub) {
     pub.hidden = !(Auth.enabled() && Auth.canRedirect() && (settings.driveEditor || mineTeams.length));
     $('#pubBaseRow').hidden = $('#drivePublish').hidden = !settings.driveEditor;
+    $('#addSongRow').hidden = !settings.driveEditor; // 3.13: organizers only
     Pub.render(mineTeams);
   }
   // Edit: organizers and team music volunteers (3.1: no more changes that stay on one device)
@@ -4112,6 +4259,7 @@ async function boot() {
   Edit.init();
   Drag.init();
   Settings.init();
+  AddSong.init(); // 3.13
   Admin.init();
   applyRole();
   $('#help').addEventListener('click', e => { if (e.target.closest('[data-close-help]')) $('#help').close(); });
